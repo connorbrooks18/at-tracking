@@ -6,9 +6,11 @@ from pupil_apriltags import Detector
 
 
 # suppress apriltag C library stderr
+"""
 devnull = open(os.devnull, 'w')
 old_stderr = os.dup(2)
 os.dup2(devnull.fileno(), 2)
+#"""
 
 def relativePoses(reference, alltags):
     """
@@ -38,20 +40,26 @@ def relativePoses(reference, alltags):
 
 port = 1
 capture = cv2.VideoCapture(port)
-capture.set(cv2.CAP_PROP_EXPOSURE, -6) # decrease exposure
-capture.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25) # decrease auto exposure
-# change resolution
-capture.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+# disable auto settings first — order matters
+capture.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1)      # 1 = manual, 3 = auto (varies by driver)
+capture.set(cv2.CAP_PROP_AUTOFOCUS, 0)          # disable autofocus
+capture.set(cv2.CAP_PROP_AUTO_WB, 0)            # disable auto white balance
+
+# then set manual values
+capture.set(cv2.CAP_PROP_EXPOSURE, -6)          # log scale on most webcams, try -4 to -8
+capture.set(cv2.CAP_PROP_BRIGHTNESS, 100)       # 0-255
+capture.set(cv2.CAP_PROP_CONTRAST, 150)         # 0-255
+capture.set(cv2.CAP_PROP_GAIN, 0)    
+
 
 
 detector = Detector(
    families="tag16h5", # wrong family. need to print out actual tags 
-   nthreads=2,
-   quad_decimate=1.0,
-   quad_sigma=0.6,
+   nthreads=4,
+   quad_decimate=2.0,
+   quad_sigma=.25,
    refine_edges=1,
-   decode_sharpening=1,
+   decode_sharpening=.25,
    debug=0
 )
 
@@ -66,15 +74,17 @@ while(True):
 
 	ret, frame = capture.read()
 	#params = (1350, 1350, 960, 540) # fx, fy, cx, cy
-	params = (900, 900, 640, 360) # 720p
-	allowed_ids = (8, 1)
+	#params = (900, 900, 640, 360) # 720p
+	# for realsense belo
+	params = (921.48, 921.89, 644.41, 358.64)
+	allowed_ids = (8, 5)
 
 	gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 	#tags = detector.detect(gray, estimate_tag_pose=False)
 	tags = detector.detect(gray, estimate_tag_pose=True, camera_params=params, tag_size=.055)
  
  
-	tags = [t for t in tags if t.decision_margin > 60 and t.tag_id in allowed_ids]
+	tags = [t for t in tags if t.decision_margin > 10 and t.tag_id in allowed_ids]
 
 
  	#reference tag number
@@ -108,13 +118,24 @@ while(True):
 		continue
 	for tag_id, pose in poses.items():
 		tag = tag_dict[tag_id]
+		center = tuple(tag.center.astype(int))
+
+		# get translation and add it to frame
 		trans = [str(round(n, 2)) for n in pose['pos'].tolist()]
 		text_trans = ",".join(trans)
-		cv2.putText(frame, text_trans, tuple(tag.center.astype(int)), 
+		cv2.putText(frame, text_trans, center, 
 					cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,0,255), 2)
+
+		# add normal vector
+		normal = pose['rot'][:, 2]
+		norm_text = f"n:{normal[0]:.2f},{normal[1]:.2f},{normal[2]:.2f}"
+		cv2.putText(frame, norm_text, (center[0], center[1] + 20),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,0,255), 2)
+
 		corners = tag.corners.astype(int)
 		cv2.polylines(frame, [corners], True, (0,255,0), 2)
 		cv2.circle(frame, tuple(tag.center.astype(int)), 5, (0,0,255), -1)
+		#print(tag_id + ": " + text_trans)
 	
 
 	cv2.imshow('frame', frame)

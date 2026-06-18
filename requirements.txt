@@ -3,3 +3,4 @@ numpy
 pupil-apriltags
 opencv-python-headless
 Pillow
+pyrealsense2
