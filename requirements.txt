@@ -1,0 +1,5 @@
+opencv-python
+numpy
+pupil-apriltags
+opencv-python-headless
+Pillow
