@@ -81,7 +81,7 @@ while(True):
 
 	gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 	#tags = detector.detect(gray, estimate_tag_pose=False)
-	tags = detector.detect(gray, estimate_tag_pose=True, camera_params=params, tag_size=.055)
+	tags = detector.detect(gray, estimate_tag_pose=True, camera_params=params, tag_size=.0381)
  
  
 	tags = [t for t in tags if t.decision_margin > 10 and t.tag_id in allowed_ids]
