@@ -39,10 +39,14 @@ import os
 
 import cv2
 import numpy as np
+from scipy.spatial.transform import Rotation as R
 import pyrealsense2 as rs
 from pupil_apriltags import Detector
+import time
+start = time.time()
 
 import annotate
+from DataCollector import DataCollector
 
 # Physical tag edge length (metres): black border outer-edge to outer-edge.
 # Do NOT include the white quiet zone.
@@ -116,8 +120,8 @@ class Tracker:
                 first_rot = T_ref_obj[:3, :3]
 
         if not positions:
-            self.pose = None
-            return None
+            self.pose = self.pose
+            return self.pose
 
         self.pose = {
             "pos": np.mean(positions, axis=0),
@@ -275,6 +279,8 @@ def main():
         trackers=trackers,
     )
 
+    dataCollector = DataCollector()
+
     try:
         while True:
             frames      = pipeline.pipeline.wait_for_frames()
@@ -286,10 +292,17 @@ def main():
             _, tag_dict = pipeline.process_frame(frame)
             pipeline.annotate_frame(frame, tag_dict)
 
+            for tracker in trackers:
+                x, y, z = tracker.pose['pos'] if tracker.pose is not None and tracker.pose['pos'] is not None else (0, 0, 0)
+                quat = R.from_matrix(tracker.pose['rot'], assume_valid=False).as_quat() if tracker.pose is not None and tracker.pose['rot'] is not None else (0, 0, 0, 1) # returns [x, y, z, w]
+                dataCollector.update(time.time() - start, tracker.name, x, y, z, quat[0], quat[1], quat[2], quat[3])
+
             cv2.imshow("RealSense Tracker", frame)
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 break
     finally:
+        dataCollector.print()
+        dataCollector.dump()
         pipeline.pipeline.stop()
         cv2.destroyAllWindows()
 

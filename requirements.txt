@@ -4,3 +4,6 @@ pupil-apriltags
 opencv-python-headless
 Pillow
 pyrealsense2
+pyarrow
+pandas
+scipy

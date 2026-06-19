@@ -1,0 +1,1 @@
+I'm sorry if AI use offends anyone. The first handful of commits were fully mine.
