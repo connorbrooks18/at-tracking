@@ -11,6 +11,7 @@ class Tracker:
         self.ids = ids
         self.pose = None  # {'pos': [x,y,z], 'rot': R} in reference frame
         
+        """
         # Store Tag -> Object relative offsets as 4x4 transformation matrices
         self.offsets = {}
         for tag_id, offset in zip(ids, id_offsets):
@@ -18,6 +19,20 @@ class Tracker:
             T[:3, :3] = np.array(offset['rot'], dtype=np.float32)
             T[:3, 3] = np.array(offset['pos'], dtype=np.float32)
             self.offsets[tag_id] = T
+        """
+		# Update this loop inside Tracker.__init__
+        self.offsets = {}
+        for tag_id, offset in zip(ids, id_offsets):
+            R_offset = np.array(offset['rot'], dtype=np.float32)
+            t_offset = np.array(offset['pos'], dtype=np.float32)
+            
+            # This builds T_obj_to_tag
+            T_obj_tag = np.eye(4, dtype=np.float32)
+            T_obj_tag[:3, :3] = R_offset
+            T_obj_tag[:3, 3] = t_offset
+            
+            # Invert it to get T_tag_to_obj for the updatePose multiplication loop
+            self.offsets[tag_id] = np.linalg.inv(T_obj_tag)
 
     def updatePose(self, tags_dict):
         estimated_positions = []
@@ -110,37 +125,75 @@ class Detecting:
 
         return tags_in_ref, tag_dict
 
+
+
     def annotate_frame(self, frame, tags_in_ref, tag_dict):
         # 1. Draw detected AprilTag boundaries
         for tag_id, tag in tag_dict.items():
             corners = tag.corners.astype(int)
             cv2.polylines(frame, [corners], True, (0, 255, 0), 2)
-            cv2.putText(frame, f"ID: {tag_id}", tuple(corners[0]), 
+            
+            first_corner = tuple(corners.ravel()[:2])
+            cv2.putText(frame, f"ID: {tag_id}", first_corner, 
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
         if self.last_reference_pose is None:
             return
 
-        # 2. Project 3D Reference space -> 2D Camera space using float32 precision
+        # 2. Get Camera Extrinsics relative to Master Reference Frame
         R_ref_cam = np.array(self.last_reference_pose.pose_R, dtype=np.float32)
         t_ref_cam = np.array(self.last_reference_pose.pose_t, dtype=np.float32)
         rvec_ref_cam, _ = cv2.Rodrigues(R_ref_cam)
 
+        axis_length = 0.05 
+
         for tracker in self.trackers:
             if tracker.pose is not None:
-                obj_pos_ref = np.array(tracker.pose['pos'], dtype=np.float32).reshape(1, 3)
+                obj_pos = tracker.pose['pos']
+                obj_rot = tracker.pose['rot']
 
-                # Project 3D coordinates onto screen pixels
-                img_pts, _ = cv2.projectPoints(obj_pos_ref, rvec_ref_cam, t_ref_cam, self.K, self.dist_coeffs)
-                center_2d = tuple(img_pts.ravel().astype(int))
+                # Create 3D points (Origin and +Z Normal)
+                axis_pts_obj = np.array([
+                    [0, 0, 0],                   
+                    [0, 0, axis_length]          
+                ], dtype=np.float32)
 
-                # Render custom visual tracker dot assets
-                cv2.circle(frame, center_2d, 7, (0, 0, 255), -1)
-                cv2.putText(frame, tracker.name, (center_2d[0] + 10, center_2d[1]), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+                # Transform local axis points into the Master Reference Frame
+                axis_pts_ref = (obj_rot @ axis_pts_obj.T).T + obj_pos
 
+                # Project the two 3D points onto the 2D screen pixels
+                img_pts, _ = cv2.projectPoints(axis_pts_ref, rvec_ref_cam, t_ref_cam, self.K, self.dist_coeffs)
+                
+                # Flatten coordinates to plain 1D list
+                flat_list = [int(v) for v in img_pts.ravel()]
+
+                # Sequential tuple unpacking to bypass brackets
+                ox, oy, zx, zy = flat_list
+
+                origin = (ox, oy)
+                z_axis = (zx, zy)
+
+                h, w = frame.shape[:2]
+
+                # Draw Z-Axis / Normal Vector line (Blue)
+                ret, p1, p2 = cv2.clipLine((0, 0, w, h), origin, z_axis)
+                if ret: cv2.line(frame, p1, p2, (255, 0, 0), 3)
+
+                # Render tracking dot anchor and coordinate text overlay if inside screen
+                if 0 <= ox < w and 0 <= oy < h:
+                    cv2.circle(frame, origin, 5, (0, 0, 255), -1)
+                    
+                    # Extract positions for on-screen label string
+                    tx, ty, tz = [float(v) for v in obj_pos.ravel()]
+                    pose_text = f"{tracker.name} (X:{tx:+.2f}, Y:{ty:+.2f}, Z:{tz:+.2f})"
+                    
+                    text_x = ox + 12
+                    text_y = oy - 5
+                    cv2.putText(frame, pose_text, (text_x, text_y), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
 
 def main():
+
     apple_offsets = [{'pos': [0.0, 0.0, -0.05], 'rot': np.eye(3)}]
     apple = Tracker("Apple", ids=(4,), id_offsets=apple_offsets)
 
