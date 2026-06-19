@@ -11,15 +11,12 @@ class Tracker:
         self.ids = ids
         self.pose = None  # {'pos': [x,y,z], 'rot': R} in reference frame
         
-        # Directly treating offsets as Tag -> Object to match your measurement intuition
+        # Store Tag -> Object relative offsets as 4x4 transformation matrices
         self.offsets = {}
         for tag_id, offset in zip(ids, id_offsets):
-            R_offset = np.array(offset['rot'])
-            t_offset = np.array(offset['pos'])
-            
-            T = np.eye(4)
-            T[:3, :3] = R_offset
-            T[:3, 3] = t_offset
+            T = np.eye(4, dtype=np.float32)
+            T[:3, :3] = np.array(offset['rot'], dtype=np.float32)
+            T[:3, 3] = np.array(offset['pos'], dtype=np.float32)
             self.offsets[tag_id] = T
 
     def updatePose(self, tags_dict):
@@ -31,7 +28,7 @@ class Tracker:
                 R_tag = tags_dict[tag_id]['rot']
                 t_tag = tags_dict[tag_id]['pos']
                 
-                T_ref_tag = np.eye(4)
+                T_ref_tag = np.eye(4, dtype=np.float32)
                 T_ref_tag[:3, :3] = R_tag
                 T_ref_tag[:3, 3] = t_tag
 
@@ -46,6 +43,7 @@ class Tracker:
             self.pose = None
             return None
 
+        # SVD fusion for multi-tag filtering stability
         avg_pos = np.mean(estimated_positions, axis=0)
         avg_R_approx = np.mean(estimated_rotations, axis=0)
         U, _, Vt = np.linalg.svd(avg_R_approx)
@@ -73,11 +71,11 @@ class Detecting:
         intr = profile.get_stream(rs.stream.color).as_video_stream_profile().get_intrinsics()
         self.camera_params = (intr.fx, intr.fy, intr.ppx, intr.ppy)
         
-        # Build Camera Matrices for cv2.projectPoints
+        # Build Camera Matrices using float32 to prevent cv2.projectPoints validation issues
         self.K = np.array([[intr.fx, 0, intr.ppx],
                            [0, intr.fy, intr.ppy],
-                          ], dtype=np.float32)
-        self.dist_coeffs = np.zeros(5) # RealSense streams are already rectified
+                         [0, 0, 1] ], dtype=np.float32)
+        self.dist_coeffs = np.zeros(5, dtype=np.float32)
 
         # Initialize AprilTag Detector
         self.detector = Detector(families="tag36h11", nthreads=4)
@@ -85,22 +83,19 @@ class Detecting:
     def process_frame(self, frame):
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         
-        # Detect tags with pose estimation
         raw_tags = self.detector.detect(gray, estimate_tag_pose=True, 
                                         camera_params=self.camera_params, tag_size=0.0335)
         
-        # Filter detections
         valid_tags = [t for t in raw_tags if t.decision_margin > self.decision_margin and t.tag_id in self.allowed_ids]
         tag_dict = {t.tag_id: t for t in valid_tags}
 
-        # Handle master reference persistence
         if self.reference_id in tag_dict:
             self.last_reference_pose = tag_dict[self.reference_id]
 
         if self.last_reference_pose is None:
-            return {}, tag_dict # Can't build relative poses without a anchor reference
+            return {}, tag_dict
 
-        # Transform all tags to Master Reference Frame
+        # Transform tag tracking arrays to Master Reference Frame
         R_ref_inv = self.last_reference_pose.pose_R.T
         t_ref = self.last_reference_pose.pose_t
         
@@ -108,9 +103,8 @@ class Detecting:
         for tag_id, tag in tag_dict.items():
             t_rel = R_ref_inv @ (tag.pose_t - t_ref)
             R_rel = R_ref_inv @ tag.pose_R
-            tags_in_ref[tag_id] = {'pos': t_rel.flatten(), 'rot': R_rel}
+            tags_in_ref[tag_id] = {'pos': t_rel.flatten().astype(np.float32), 'rot': R_rel.astype(np.float32)}
 
-        # Update tracker objects
         for tracker in self.trackers:
             tracker.updatePose(tags_in_ref)
 
@@ -121,40 +115,43 @@ class Detecting:
         for tag_id, tag in tag_dict.items():
             corners = tag.corners.astype(int)
             cv2.polylines(frame, [corners], True, (0, 255, 0), 2)
-            cv2.putText(frame, f"ID: {tag_id}", tuple(corners), 
+            cv2.putText(frame, f"ID: {tag_id}", tuple(corners[0]), 
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
         if self.last_reference_pose is None:
             return
 
-        # 2. Draw Tracker Object Centers (Project 3D Reference space -> 2D Camera space)
-        # T_cam_ref matrix brings points from Master Ref frame to Camera frame
-        R_ref_cam = self.last_reference_pose.pose_R
-        t_ref_cam = self.last_reference_pose.pose_t
+        # 2. Project 3D Reference space -> 2D Camera space using float32 precision
+        R_ref_cam = np.array(self.last_reference_pose.pose_R, dtype=np.float32)
+        t_ref_cam = np.array(self.last_reference_pose.pose_t, dtype=np.float32)
         rvec_ref_cam, _ = cv2.Rodrigues(R_ref_cam)
 
         for tracker in self.trackers:
             if tracker.pose is not None:
-                # 3D position of object in Master Reference frame
-                obj_pos_ref = tracker.pose['pos'].reshape(1, 3)
+                obj_pos_ref = np.array(tracker.pose['pos'], dtype=np.float32).reshape(1, 3)
 
-                # Project 3D point in master reference frame to 2D image coordinates
+                # Project 3D coordinates onto screen pixels
                 img_pts, _ = cv2.projectPoints(obj_pos_ref, rvec_ref_cam, t_ref_cam, self.K, self.dist_coeffs)
-                center_2d = tuple(img_pts.astype(int))
+                center_2d = tuple(img_pts.ravel().astype(int))
 
-                # Visualizing tracking dot and name
+                # Render custom visual tracker dot assets
                 cv2.circle(frame, center_2d, 7, (0, 0, 255), -1)
-                cv2.putText(frame, tracker.name, (center_2d + 10, center_2d), 
+                cv2.putText(frame, tracker.name, (center_2d[0] + 10, center_2d[1]), 
                             cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
 
 
 def main():
-    # Setup dummy offsets for example (Tag 0 is right at the center of 'apple')
-    apple_offsets = [{'pos': [0.0, 0.0, 0.0], 'rot': np.eye(3)}]
-    apple = Tracker("Apple", ids=(0,), id_offsets=apple_offsets)
+    apple_offsets = [{'pos': [0.0, 0.0, -0.05], 'rot': np.eye(3)}]
+    apple = Tracker("Apple", ids=(4,), id_offsets=apple_offsets)
+
+    spur_end_offsets = [{'pos': [0.0, -0.025, -0.02], 'rot': np.eye(3)}]
+    spur_end = Tracker("Spur End", ids=(5,), id_offsets=spur_end_offsets)
+
+    branch_offsets = [{'pos': [0.08, 0.0, -0.015], 'rot': np.eye(3)}]
+    branch = Tracker("Branch", ids=(3,), id_offsets=branch_offsets)
     
-    trackers = [apple]
-    detector_pipeline = Detecting(allowed_ids=(0, 1, 2, 3), reference_id=2, trackers=trackers)
+    trackers = [apple, spur_end, branch]
+    detector_pipeline = Detecting(allowed_ids=(0, 1, 2, 3, 4, 5), reference_id=2, trackers=trackers)
 
     try:
         while True:
