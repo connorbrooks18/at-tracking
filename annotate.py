@@ -1,0 +1,133 @@
+"""OpenCV overlays for AprilTag detection and tracked object poses."""
+
+import cv2
+import numpy as np
+
+# BGR colors used for on-screen overlays.
+COLOR_TAG_OUTLINE = (0, 255, 0)
+COLOR_TRACKER_AXIS = (255, 0, 0)
+COLOR_TRACKER_ORIGIN = (0, 0, 255)
+COLOR_TEXT = (255, 255, 255)
+COLOR_WAITING = (0, 0, 255)
+
+
+def reference_extrinsics(reference_pose):
+    """Return OpenCV rvec/tvec for projecting reference-frame points into the image."""
+    rotation_cam_ref = np.asarray(reference_pose.pose_R, dtype=np.float64)
+    translation_cam_ref = np.asarray(reference_pose.pose_t, dtype=np.float64).reshape(3, 1)
+    rvec, _ = cv2.Rodrigues(rotation_cam_ref)
+    return rvec, translation_cam_ref
+
+
+def draw_tag_outlines(frame, tag_dict):
+    """Outline each detected tag and label it with its ID."""
+    for tag_id, tag in tag_dict.items():
+        # int32 avoids cv2.polylines assertion failures on 64-bit builds.
+        corners = tag.corners.astype(np.int32)
+        cv2.polylines(frame, [corners], True, COLOR_TAG_OUTLINE, 2)
+
+        label_pos = tuple(corners.ravel()[:2])
+        cv2.putText(
+            frame,
+            f"ID: {tag_id}",
+            label_pos,
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            COLOR_TAG_OUTLINE,
+            2,
+        )
+
+
+def draw_reference_axes(frame, camera_matrix, dist_coeffs, rvec, tvec, axis_length=0.08):
+    """Draw the reference tag coordinate frame and label its origin."""
+    cv2.drawFrameAxes(frame, camera_matrix, dist_coeffs, rvec, tvec, axis_length, 3)
+
+    origin_2d, _ = cv2.projectPoints(
+        np.zeros(3, dtype=np.float64), rvec, tvec, camera_matrix, dist_coeffs
+    )
+    ox, oy = map(int, origin_2d.ravel())
+    cv2.putText(
+        frame,
+        "Ref Origin",
+        (ox + 10, oy - 10),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.5,
+        COLOR_TEXT,
+        2,
+    )
+
+
+def draw_tracker_overlay(
+    frame, tracker, camera_matrix, dist_coeffs, rvec, tvec, axis_length=0.05
+):
+    """Project a tracker's origin and +Z axis into the image."""
+    position = tracker.pose["pos"]
+    rotation = tracker.pose["rot"]
+
+    # Object-frame origin and a point along +Z, transformed into reference frame.
+    axis_points_obj = np.array([[0, 0, 0], [0, 0, axis_length]], dtype=np.float64)
+    axis_points_ref = (rotation @ axis_points_obj.T).T + position
+
+    image_points, _ = cv2.projectPoints(
+        axis_points_ref, rvec, tvec, camera_matrix, dist_coeffs
+    )
+    ox, oy, zx, zy = map(int, image_points.ravel())
+
+    height, width = frame.shape[:2]
+    clipped, start, end = cv2.clipLine((0, 0, width, height), (ox, oy), (zx, zy))
+    if clipped:
+        cv2.line(frame, start, end, COLOR_TRACKER_AXIS, 3)
+
+    if 0 <= ox < width and 0 <= oy < height:
+        cv2.circle(frame, (ox, oy), 5, COLOR_TRACKER_ORIGIN, -1)
+
+        x, y, z = position.ravel()
+        label = f"{tracker.name} (X:{x:+.2f}, Y:{y:+.2f}, Z:{z:+.2f})"
+        cv2.putText(
+            frame,
+            label,
+            (ox + 12, oy - 5),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            COLOR_TEXT,
+            2,
+        )
+
+
+def draw_tracker_axes(frame, trackers, camera_matrix, dist_coeffs, rvec, tvec):
+    """Draw overlays for every tracker with a current pose estimate."""
+    active_trackers = [tracker for tracker in trackers if tracker.pose is not None]
+
+    for tracker in active_trackers:
+        draw_tracker_overlay(frame, tracker, camera_matrix, dist_coeffs, rvec, tvec)
+
+    if not active_trackers:
+        cv2.putText(
+            frame,
+            "Waiting for Object Tags (IDs 3, 4, 5)...",
+            (20, 40),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            COLOR_WAITING,
+            2,
+        )
+
+
+def annotate_frame(
+    frame,
+    tag_dict,
+    *,
+    last_reference_pose,
+    trackers,
+    camera_matrix,
+    dist_coeffs,
+):
+    """Draw tag outlines, reference axes, and tracker overlays on a BGR frame."""
+    draw_tag_outlines(frame, tag_dict)
+
+    if last_reference_pose is None:
+        return
+
+    rvec, tvec = reference_extrinsics(last_reference_pose)
+    draw_reference_axes(frame, camera_matrix, dist_coeffs, rvec, tvec)
+    draw_tracker_axes(frame, trackers, camera_matrix, dist_coeffs, rvec, tvec)
