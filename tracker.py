@@ -77,11 +77,11 @@ while(True):
 	#params = (900, 900, 640, 360) # 720p
 	# for realsense belo
 	params = (921.48, 921.89, 644.41, 358.64)
-	allowed_ids = (0,1,2,3)
+	allowed_ids = (0,1,2,3, 4, 5)
 
 	gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 	#tags = detector.detect(gray, estimate_tag_pose=False)
-	tags = detector.detect(gray, estimate_tag_pose=True, camera_params=params, tag_size=.034925)
+	tags = detector.detect(gray, estimate_tag_pose=True, camera_params=params, tag_size=.0335)
  
  
 	tags = [t for t in tags if t.decision_margin > 10 and t.tag_id in allowed_ids]
