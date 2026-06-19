@@ -54,7 +54,7 @@ capture.set(cv2.CAP_PROP_GAIN, 0)
 
 
 detector = Detector(
-   families="tag16h5", # wrong family. need to print out actual tags 
+   families="tag36h11", # wrong family. need to print out actual tags 
    nthreads=4,
    quad_decimate=2.0,
    quad_sigma=.25,
@@ -77,18 +77,18 @@ while(True):
 	#params = (900, 900, 640, 360) # 720p
 	# for realsense belo
 	params = (921.48, 921.89, 644.41, 358.64)
-	allowed_ids = (8, 5)
+	allowed_ids = (0,1,2,3)
 
 	gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 	#tags = detector.detect(gray, estimate_tag_pose=False)
-	tags = detector.detect(gray, estimate_tag_pose=True, camera_params=params, tag_size=.0381)
+	tags = detector.detect(gray, estimate_tag_pose=True, camera_params=params, tag_size=.034925)
  
  
 	tags = [t for t in tags if t.decision_margin > 10 and t.tag_id in allowed_ids]
 
 
  	#reference tag number
-	ref = 8
+	ref = 2
 	tag_dict = {t.tag_id: t for t in tags}
 
 	if ref not in tag_dict:
@@ -99,18 +99,6 @@ while(True):
 	
 	poses = relativePoses(last_reference, tag_dict.values())
 
-	"""
-	for tag in tags:
-		print(f"ID: {tag.tag_id}  center: {tag.center}")
-		# draw it
-		corners = tag.corners.astype(int)
-		cv2.polylines(frame, [corners], True, (0,255,0), 2)
-		cv2.circle(frame, tuple(tag.center.astype(int)), 5, (0,0,255), -1)
-		# pose_t, pose_R
-		trans = [str(round(n[0], 2)) for n in tag.pose_t.tolist()]
-		text_trans = ",".join(trans)
-		cv2.putText(frame, text_trans, tuple(tag.center.astype(int)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
-	"""
 	if(poses == None):
 		cv2.imshow('frame', frame)
 		if cv2.waitKey(1) & 0xFF == ord('q'):
@@ -120,8 +108,13 @@ while(True):
 		tag = tag_dict[tag_id]
 		center = tuple(tag.center.astype(int))
 
+		# mark tag
+		corners = tag.corners.astype(int)
+		cv2.polylines(frame, [corners], True, (0,255,0), 2)
+		cv2.circle(frame, center, 5, (0,0,255), -1)
+
 		# get translation and add it to frame
-		trans = [str(round(n, 2)) for n in pose['pos'].tolist()]
+		trans = [str(round(n, 3)) for n in pose['pos'].tolist()]
 		text_trans = ",".join(trans)
 		cv2.putText(frame, text_trans, center, 
 					cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,0,255), 2)
@@ -132,10 +125,6 @@ while(True):
 		cv2.putText(frame, norm_text, (center[0], center[1] + 20),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,0,255), 2)
 
-		corners = tag.corners.astype(int)
-		cv2.polylines(frame, [corners], True, (0,255,0), 2)
-		cv2.circle(frame, tuple(tag.center.astype(int)), 5, (0,0,255), -1)
-		#print(tag_id + ": " + text_trans)
 	
 
 	cv2.imshow('frame', frame)
@@ -145,5 +134,5 @@ while(True):
 
 capture.release()
 cv2.destroyAllWindows()
-os.dup2(old_stderr, 2)
+#os.dup2(old_stderr, 2)
 
