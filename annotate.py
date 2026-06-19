@@ -40,12 +40,16 @@ def draw_tag_outlines(frame, tag_dict):
 
 def draw_reference_axes(frame, camera_matrix, dist_coeffs, rvec, tvec, axis_length=0.08):
     """Draw the reference tag coordinate frame and label its origin."""
+    camera_matrix = np.asarray(camera_matrix, dtype=np.float64)
+    dist_coeffs = np.asarray(dist_coeffs, dtype=np.float64)
+
     cv2.drawFrameAxes(frame, camera_matrix, dist_coeffs, rvec, tvec, axis_length, 3)
 
+    origin_3d = np.zeros((1, 3), dtype=np.float64)
     origin_2d, _ = cv2.projectPoints(
-        np.zeros(3, dtype=np.float64), rvec, tvec, camera_matrix, dist_coeffs
+        origin_3d, rvec, tvec, camera_matrix, dist_coeffs
     )
-    ox, oy = map(int, origin_2d.ravel())
+    ox, oy = int(origin_2d[0, 0, 0]), int(origin_2d[0, 0, 1])
     cv2.putText(
         frame,
         "Ref Origin",
@@ -61,8 +65,11 @@ def draw_tracker_overlay(
     frame, tracker, camera_matrix, dist_coeffs, rvec, tvec, axis_length=0.05
 ):
     """Project a tracker's origin and +Z axis into the image."""
-    position = tracker.pose["pos"]
-    rotation = tracker.pose["rot"]
+    position = np.asarray(tracker.pose["pos"], dtype=np.float64).reshape(1, 3)
+    rotation = np.asarray(tracker.pose["rot"], dtype=np.float64)
+
+    camera_matrix = np.asarray(camera_matrix, dtype=np.float64)
+    dist_coeffs = np.asarray(dist_coeffs, dtype=np.float64)
 
     # Object-frame origin and a point along +Z, transformed into reference frame.
     axis_points_obj = np.array([[0, 0, 0], [0, 0, axis_length]], dtype=np.float64)
@@ -71,7 +78,8 @@ def draw_tracker_overlay(
     image_points, _ = cv2.projectPoints(
         axis_points_ref, rvec, tvec, camera_matrix, dist_coeffs
     )
-    ox, oy, zx, zy = map(int, image_points.ravel())
+    ox, oy = int(image_points[0, 0, 0]), int(image_points[0, 0, 1])
+    zx, zy = int(image_points[1, 0, 0]), int(image_points[1, 0, 1])
 
     height, width = frame.shape[:2]
     clipped, start, end = cv2.clipLine((0, 0, width, height), (ox, oy), (zx, zy))
@@ -81,7 +89,7 @@ def draw_tracker_overlay(
     if 0 <= ox < width and 0 <= oy < height:
         cv2.circle(frame, (ox, oy), 5, COLOR_TRACKER_ORIGIN, -1)
 
-        x, y, z = position.ravel()
+        x, y, z = position[0]
         label = f"{tracker.name} (X:{x:+.2f}, Y:{y:+.2f}, Z:{z:+.2f})"
         cv2.putText(
             frame,

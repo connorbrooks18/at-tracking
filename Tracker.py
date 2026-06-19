@@ -130,6 +130,7 @@ class Detecting:
             [
                 [intrinsics.fx, 0, intrinsics.ppx],
                 [0, intrinsics.fy, intrinsics.ppy],
+                [0, 0, 1],
             ],
             dtype=np.float32,
         )
