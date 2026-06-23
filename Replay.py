@@ -30,8 +30,8 @@ TRAIL_LEN       = 60
 AXIS_LEN_M      = 0.04
 
 TRACKER_COLORS = {
-    "Apple":  (60,  60,  230),
-    "Branch": (60,  200,  60),
+    "Apple":  (60,  60,  180),
+    "Branch": (60,  100,  60),
 }
 DEFAULT_COLOR = (255, 255, 255)
 
