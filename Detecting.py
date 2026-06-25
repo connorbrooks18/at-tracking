@@ -30,7 +30,13 @@ class Detecting:
         self.last_reference_pose = None  # persists across brief occlusions
 
         self._init_camera()
-        self.detector = Detector(families="tag36h11", nthreads=4)
+        self.detector = Detector(families="tag36h11",
+                                 quad_decimate=1.0,
+                                 nthreads=4,
+                                 refine_edges=1,
+                                 quad_sigma=0.8,
+                                 decode_sharpening=1.0
+                        )
 
     def _init_camera(self):
         """Start the RealSense color stream and cache intrinsics."""
@@ -153,6 +159,7 @@ def main():
         allowed_ids=(0, 1, 2, 3, 4, 5),
         reference_id=2,
         trackers=trackers,
+        decision_margin=15
     )
 
     dataCollector = DataCollector()
