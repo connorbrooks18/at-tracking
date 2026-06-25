@@ -9,7 +9,7 @@ import numpy as np
 from scipy.spatial.transform import Rotation as R
 
 # tag length in meters
-TAG_SIZE_M = 0.0335
+TAG_SIZE_M = 0.018
 
 class Detecting:
     """RealSense capture, AprilTag detection, and reference-frame tracking pipeline."""
@@ -124,23 +124,31 @@ class Detecting:
         return tags_in_ref
 
 
+
+# USAGE BELOW
+
 def main():
     start = time.time()
 
-    apple_offsets = [
-	        {"pos": [0.0, 0.0, 0.05], "rot": np.eye(3),},
-	        {"pos": [0, 0.0, 0.05], "rot": [[0, 0, -1], [0, 1,  0], [1, 0,  0]]}]
-    apple = Tracker.Tracker("Apple", ids=(4, 5), id_offsets=apple_offsets)
+    #relationship between tags and offsets
+    apple_offsets = [{"pos": [0.0, -0.05, 0.0], "rot": np.eye(3),},]
+	        #{"pos": [0, 0.0, 0.05], "rot": [[0, 0, -1], [0, 1,  0], [1, 0,  0]]}]
+    apple = Tracker.Tracker("Apple", ids=(3,), id_offsets=apple_offsets)
+
+    spur_offsets = [{"pos": [0.0, 0.01, -0.03], "rot": np.eye(3)},]
+    spur = Tracker.Tracker("Spur", ids=(5,), id_offsets=spur_offsets)
 
     branch_offsets = [
         {
-            "pos": [-0.07, 0.0, 0.015],
+            "pos": [0, -0.01, -0.03],
             "rot": np.eye(3),
         },
     ]
-    branch = Tracker.Tracker("Branch", ids=(3,), id_offsets=branch_offsets)
+    branch = Tracker.Tracker("Branch", ids=(4,), id_offsets=branch_offsets)
 
-    trackers = [apple, branch]
+    trackers = [apple, branch, spur]
+
+
     pipeline = Detecting(
         allowed_ids=(0, 1, 2, 3, 4, 5),
         reference_id=2,
@@ -169,7 +177,7 @@ def main():
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 break
     finally:
-        dataCollector.print()
+        #dataCollector.print()
         dataCollector.dump()
         pipeline.pipeline.stop()
         cv2.destroyAllWindows()

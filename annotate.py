@@ -38,7 +38,7 @@ def draw_tag_outlines(frame, tag_dict):
         )
 
 
-def draw_reference_axes(frame, camera_matrix, dist_coeffs, rvec, tvec, axis_length=0.08):
+def draw_reference_axes(frame, camera_matrix, dist_coeffs, rvec, tvec, axis_length=0.03):
     """Draw the reference tag coordinate frame and label its origin."""
     camera_matrix = np.asarray(camera_matrix, dtype=np.float64)
     dist_coeffs = np.asarray(dist_coeffs, dtype=np.float64)
@@ -62,7 +62,7 @@ def draw_reference_axes(frame, camera_matrix, dist_coeffs, rvec, tvec, axis_leng
 
 
 def draw_tracker_overlay(
-    frame, tracker, camera_matrix, dist_coeffs, rvec, tvec, axis_length=0.05
+    frame, tracker, camera_matrix, dist_coeffs, rvec, tvec, axis_length=0.06
 ):
     """Project a tracker's origin and +Z axis into the image."""
     position = np.asarray(tracker.pose["pos"], dtype=np.float64).reshape(1, 3)
