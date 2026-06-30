@@ -5,6 +5,7 @@
 import os
 import numpy as np
 import pyrealsense2 as rs
+from scipy import linalg
 
 
 
@@ -57,6 +58,9 @@ class Tracker:
             positions.append(T_ref_obj[:3, 3])
             if first_rot is None:
                 first_rot = T_ref_obj[:3, :3]
+                det = linalg.det(first_rot)
+                if det < 0:
+                    first_rot = -1 * first_rot
 
         if not positions or len(positions) == 0:
             self.pose = None

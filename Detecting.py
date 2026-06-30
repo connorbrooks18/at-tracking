@@ -34,7 +34,7 @@ class Detecting:
                                  quad_decimate=1.0,
                                  nthreads=24,
                                  refine_edges=1,
-                                 quad_sigma=0.0,
+                                 quad_sigma=0.2,
                                  decode_sharpening=1.0
                         )
 
@@ -186,7 +186,7 @@ def main():
             for tracker in trackers:
                 x, y, z = tracker.pose['pos'] if tracker.pose is not None and tracker.pose['pos'] is not None else (0, 0, 0)
                 #try:
-                quat = R.from_matrix(tracker.pose['rot'],).as_quat() if tracker.pose is not None and tracker.pose['rot'] is not None else (0, 0, 0, 1) # returns [x, y, z, w]
+                quat = R.from_matrix(tracker.pose['rot'],assume_valid=False).as_quat() if tracker.pose is not None and tracker.pose['rot'] is not None else (0, 0, 0, 1) # returns [x, y, z, w]
                 #finally:
                 #quat = (0, 0, 0, 1)
                 dataCollector.update(time.time() - start, tracker.name, x, y, z, quat[0], quat[1], quat[2], quat[3])
