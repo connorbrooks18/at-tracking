@@ -9,7 +9,7 @@ import numpy as np
 from scipy.spatial.transform import Rotation as R
 
 # tag length in meters
-TAG_SIZE_M = 0.0185
+TAG_SIZE_M = 0.0170
 
 class Detecting:
     """RealSense capture, AprilTag detection, and reference-frame tracking pipeline."""
@@ -137,9 +137,11 @@ def main():
     start = time.time()
 
     #relationship between tags and offsets
-    apple_offsets = [{"pos": [0.0, -0.05, 0.0], "rot": np.eye(3),},]
-	        {"pos": [0, 0.0, 0.05], "rot": [[0, 0, -1], [0, 1,  0], [1, 0,  0]]}]
-    apple = Tracker.Tracker("Apple", ids=(8,), id_offsets=apple_offsets)
+
+    # second apple offset is for tag only 45 degrees from it
+    apple_offsets = [{"pos": [-.002737, .00298, .10783], "rot": [[0.7071, 0, -0.7071], [0, 1,  0], [0.7071, 0,  0.7071]],},
+	        {"pos": [.09283, -.00293, -.00737], "rot": [[-0.7071, 0, -0.7071], [0, 1,  0], [0.7071, 0,  -0.7071]]}]
+    apple = Tracker.Tracker("Apple", ids=(6,7), id_offsets=apple_offsets)
 
     spur_offsets = [{"pos": [0.0, 0.01, 0.03], "rot": np.eye(3)},{"pos": [0.0, 0.01, 0.03], "rot": [[0, 0, -1], [0, 1,  0], [1, 0,  0]]},{"pos": [0.0, 0.01, 0.03], "rot": [[0, 0, 1], [0, 1,  0], [-1, 0,  0]]}]
     spur = Tracker.Tracker("Spur", ids=(3,4,5,), id_offsets=spur_offsets)
@@ -156,7 +158,7 @@ def main():
 
 
     pipeline = Detecting(
-        allowed_ids=(0, 1, 2, 3, 4, 5),
+        allowed_ids=(0, 1, 2, 3, 4, 5, 6, 7, 8),
         reference_id=1,
         trackers=trackers,
         decision_margin=15
@@ -177,7 +179,10 @@ def main():
 
             for tracker in trackers:
                 x, y, z = tracker.pose['pos'] if tracker.pose is not None and tracker.pose['pos'] is not None else (0, 0, 0)
-                quat = R.from_matrix(tracker.pose['rot'], assume_valid=False).as_quat() if tracker.pose is not None and tracker.pose['rot'] is not None else (0, 0, 0, 1) # returns [x, y, z, w]
+                #try:
+                quat = R.from_matrix(tracker.pose['rot'],).as_quat() if tracker.pose is not None and tracker.pose['rot'] is not None else (0, 0, 0, 1) # returns [x, y, z, w]
+                #finally:
+                #quat = (0, 0, 0, 1)
                 dataCollector.update(time.time() - start, tracker.name, x, y, z, quat[0], quat[1], quat[2], quat[3])
 
             cv2.imshow("RealSense Tracker", frame)
