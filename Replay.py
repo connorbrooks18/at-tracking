@@ -24,7 +24,7 @@ from DataCollector import DataCollector
 
 # ── Config ────────────────────────────────────────────────────────────────────
 REFERENCE_ID    = 1
-TAG_SIZE_M      = 0.0185
+TAG_SIZE_M      = 0.0170
 DECISION_MARGIN = 5
 TRAIL_LEN       = 60
 AXIS_LEN_M      = 0.04
@@ -62,8 +62,8 @@ def init_camera():
 
 def init_detector():
     return Detector(families="tag36h11", nthreads=4,
-                    quad_decimate=2.0, quad_sigma=0.25,
-                    refine_edges=1, decode_sharpening=0.25, debug=0)
+                    quad_decimate=1.0, quad_sigma=0.8,
+                    refine_edges=1, decode_sharpening=1, debug=0)
 
 
 # ── Reference tag detection ───────────────────────────────────────────────────
@@ -238,6 +238,8 @@ def main():
 
             # draw each recorded object
             for name, (x, y, z, qx, qy, qz, qw) in objects.items():
+                if (x,y,z) == (0, 0, 0):
+                    continue
                 trail = trails.setdefault(name, [])
                 draw_replay_pose(
                     frame, name, x, y, z, qx, qy, qz, qw,

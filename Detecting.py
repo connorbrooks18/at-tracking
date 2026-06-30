@@ -154,7 +154,7 @@ def main():
     ]
     branch = Tracker.Tracker("Branch", ids=(2,), id_offsets=branch_offsets)
 
-    trackers = [apple, branch, spur]
+    trackers = [branch, spur] # , apple
 
 
     pipeline = Detecting(

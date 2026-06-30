@@ -38,7 +38,6 @@ def main():
     blank_dict = {"all": [0, 0],}
 
     for i in range(table.num_rows):
-        print(millis[i])
         pose = (float(xs[i]), float(ys[i]), float(zs[i]))
         if names[i] not in blank_dict:
             blank_dict[names[i]] = [0, 0]
@@ -51,8 +50,9 @@ def main():
 
     for key in blank_dict:
         print(f"{key} has {blank_dict[key][0]} +  blank out of  + {blank_dict[key][1]} or {blank_dict[key][0]/blank_dict[key][1]}")
+
     length = -(float(millis[0])-float(millis[-1]))
-    frames = len(set(millis))
+    frames = blank_dict[names[0]][1]
     fps = frames/length
     print(f"length was {length:.2f} seconds with {frames} frames or {fps:.2f} fps")
 	
