@@ -32,9 +32,9 @@ class Detecting:
         self._init_camera()
         self.detector = Detector(families="tag36h11",
                                  quad_decimate=1.0,
-                                 nthreads=4,
+                                 nthreads=24,
                                  refine_edges=1,
-                                 quad_sigma=0.8,
+                                 quad_sigma=0.0,
                                  decode_sharpening=1.0
                         )
 
@@ -42,8 +42,14 @@ class Detecting:
         """Start the RealSense color stream and cache intrinsics."""
         self.pipeline = rs.pipeline()
         config        = rs.config()
-        config.enable_stream(rs.stream.color, 1280, 720, rs.format.bgr8, 30)
+        fps = 15 # 6, 15, 30
+        config.enable_stream(rs.stream.color, 1280, 720, rs.format.bgr8, fps)
         profile = self.pipeline.start(config)
+        color_sensor = profile.get_device().query_sensors()[1]
+        color_sensor.set_option(rs.option.enable_auto_exposure, 0)
+
+        # Set a low manual exposure value (e.g., 70-150 microseconds)
+        color_sensor.set_option(rs.option.exposure, 100) 
 
         intrinsics = (
             profile.get_stream(rs.stream.color)
@@ -139,9 +145,9 @@ def main():
     #relationship between tags and offsets
 
     # second apple offset is for tag only 45 degrees from it
-    apple_offsets = [{"pos": [-.002737, .00298, .10783], "rot": [[0.7071, 0, -0.7071], [0, 1,  0], [0.7071, 0,  0.7071]],},
-	        {"pos": [.09283, -.00293, -.00737], "rot": [[-0.7071, 0, -0.7071], [0, 1,  0], [0.7071, 0,  -0.7071]]}]
-    apple = Tracker.Tracker("Apple", ids=(6,7), id_offsets=apple_offsets)
+    apple_offsets = [{"pos": [0, 0.0, .11], "rot": [[0.7071, 0, -0.7071], [0, 1,  0], [0.7071, 0,  0.7071]],},
+	        {"pos": [.09, 0, 0], "rot": [[-0.7071, 0, -0.7071], [0, 1,  0], [0.7071, 0,  -0.7071]]}]
+    apple = Tracker.Tracker("Apple", ids=(7,6), id_offsets=apple_offsets)
 
     spur_offsets = [{"pos": [0.0, 0.01, 0.03], "rot": np.eye(3)},{"pos": [0.0, 0.01, 0.03], "rot": [[0, 0, -1], [0, 1,  0], [1, 0,  0]]},{"pos": [0.0, 0.01, 0.03], "rot": [[0, 0, 1], [0, 1,  0], [-1, 0,  0]]}]
     spur = Tracker.Tracker("Spur", ids=(3,4,5,), id_offsets=spur_offsets)
@@ -154,14 +160,14 @@ def main():
     ]
     branch = Tracker.Tracker("Branch", ids=(2,), id_offsets=branch_offsets)
 
-    trackers = [branch, spur] # , apple
+    trackers = [branch, spur, apple] # , apple
 
 
     pipeline = Detecting(
         allowed_ids=(0, 1, 2, 3, 4, 5, 6, 7, 8),
         reference_id=1,
         trackers=trackers,
-        decision_margin=15
+        decision_margin=3
     )
 
     dataCollector = DataCollector()
