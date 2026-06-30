@@ -23,8 +23,8 @@ from scipy.spatial.transform import Rotation as R
 from DataCollector import DataCollector
 
 # ── Config ────────────────────────────────────────────────────────────────────
-REFERENCE_ID    = 2
-TAG_SIZE_M      = 0.018
+REFERENCE_ID    = 1
+TAG_SIZE_M      = 0.0185
 DECISION_MARGIN = 5
 TRAIL_LEN       = 60
 AXIS_LEN_M      = 0.04

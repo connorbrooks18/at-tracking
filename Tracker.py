@@ -58,8 +58,8 @@ class Tracker:
             if first_rot is None:
                 first_rot = T_ref_obj[:3, :3]
 
-        if not positions:
-            self.pose = self.pose
+        if not positions or len(positions) == 0:
+            self.pose = None
             return self.pose
 
         self.pose = {

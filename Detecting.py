@@ -9,7 +9,7 @@ import numpy as np
 from scipy.spatial.transform import Rotation as R
 
 # tag length in meters
-TAG_SIZE_M = 0.018
+TAG_SIZE_M = 0.0185
 
 class Detecting:
     """RealSense capture, AprilTag detection, and reference-frame tracking pipeline."""
@@ -138,26 +138,26 @@ def main():
 
     #relationship between tags and offsets
     apple_offsets = [{"pos": [0.0, -0.05, 0.0], "rot": np.eye(3),},]
-	        #{"pos": [0, 0.0, 0.05], "rot": [[0, 0, -1], [0, 1,  0], [1, 0,  0]]}]
-    apple = Tracker.Tracker("Apple", ids=(3,), id_offsets=apple_offsets)
+	        {"pos": [0, 0.0, 0.05], "rot": [[0, 0, -1], [0, 1,  0], [1, 0,  0]]}]
+    apple = Tracker.Tracker("Apple", ids=(8,), id_offsets=apple_offsets)
 
-    spur_offsets = [{"pos": [0.0, 0.01, -0.03], "rot": np.eye(3)},]
-    spur = Tracker.Tracker("Spur", ids=(5,), id_offsets=spur_offsets)
+    spur_offsets = [{"pos": [0.0, 0.01, 0.03], "rot": np.eye(3)},{"pos": [0.0, 0.01, 0.03], "rot": [[0, 0, -1], [0, 1,  0], [1, 0,  0]]},{"pos": [0.0, 0.01, 0.03], "rot": [[0, 0, 1], [0, 1,  0], [-1, 0,  0]]}]
+    spur = Tracker.Tracker("Spur", ids=(3,4,5,), id_offsets=spur_offsets)
 
     branch_offsets = [
         {
-            "pos": [0, -0.01, -0.03],
+            "pos": [0, -0.01, 0.03],
             "rot": np.eye(3),
         },
     ]
-    branch = Tracker.Tracker("Branch", ids=(4,), id_offsets=branch_offsets)
+    branch = Tracker.Tracker("Branch", ids=(2,), id_offsets=branch_offsets)
 
     trackers = [apple, branch, spur]
 
 
     pipeline = Detecting(
         allowed_ids=(0, 1, 2, 3, 4, 5),
-        reference_id=2,
+        reference_id=1,
         trackers=trackers,
         decision_margin=15
     )
