@@ -61,6 +61,13 @@ def init_camera():
 
 
 def init_detector():
+    return Detector(families="tag36h11",
+                                 quad_decimate=1.0,
+                                 nthreads=24,
+                                 refine_edges=1,
+                                 quad_sigma=0.2,
+                                 decode_sharpening=1.0
+                        )
     return Detector(families="tag36h11", nthreads=4,
                     quad_decimate=1.0, quad_sigma=0.8,
                     refine_edges=1, decode_sharpening=1, debug=0)
