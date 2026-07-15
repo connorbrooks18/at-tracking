@@ -1,5 +1,3 @@
-I used a bit too much genAI in the opencv code. I think it's more or less readable still. 
-
 -------------------------
 
 Tracker is object used to track the pose of one object
