@@ -1,3 +1,4 @@
+import argparse
 from pupil_apriltags import Detector
 import annotate
 import pyrealsense2 as rs
@@ -42,14 +43,23 @@ class Detecting:
         """Start the RealSense color stream and cache intrinsics."""
         self.pipeline = rs.pipeline()
         config        = rs.config()
-        fps = 15 # 6, 15, 30
-        config.enable_stream(rs.stream.color, 1280, 720, rs.format.bgr8, fps)
+        self.camera_fps = 15 # 6, 15, 30
+        self.camera_width = 1280
+        self.camera_height = 720
+        self.camera_exposure = 100
+        config.enable_stream(
+            rs.stream.color,
+            self.camera_width,
+            self.camera_height,
+            rs.format.bgr8,
+            self.camera_fps,
+        )
         profile = self.pipeline.start(config)
         color_sensor = profile.get_device().query_sensors()[1]
         color_sensor.set_option(rs.option.enable_auto_exposure, 0)
 
         # Set a low manual exposure value (e.g., 70-150 microseconds)
-        color_sensor.set_option(rs.option.exposure, 100) 
+        color_sensor.set_option(rs.option.exposure, self.camera_exposure)
 
         intrinsics = (
             profile.get_stream(rs.stream.color)
@@ -140,7 +150,11 @@ class Detecting:
 # USAGE BELOW
 
 def main():
-    start = time.time()
+    parser = argparse.ArgumentParser(description="Record AprilTag poses with Unix timestamps.")
+    parser.add_argument("--output", default="output.parquet", help="Raw tracking Parquet path")
+    args = parser.parse_args()
+
+    capture_start = time.time()
 
     #relationship between tags and offsets
 
@@ -170,7 +184,50 @@ def main():
         decision_margin=3
     )
 
-    dataCollector = DataCollector()
+    # For now, the reference-tag origin is also the fruiting-system base.
+    # TODO: replace [0, 0, 0] with a calibrated reference-tag-to-base offset
+    # when that calibration becomes available.
+    tracking_metadata = {
+        "capture_start_timestamp": capture_start,
+        "reference_tag_id": pipeline.reference_id,
+        "reference_tag_is_fruiting_base": True,
+        "fruiting_base_pos": [0.0, 0.0, 0.0],
+        "coordinate_frame": "reference_apriltag",
+        "position_unit": "m",
+        "quaternion_order": "xyzw",
+        "tag_family": "tag36h11",
+        "tag_size_m": TAG_SIZE_M,
+        "allowed_tag_ids": list(pipeline.allowed_ids),
+        "decision_margin_threshold": pipeline.decision_margin,
+        "camera": {
+            "stream": "color",
+            "width": pipeline.camera_width,
+            "height": pipeline.camera_height,
+            "fps": pipeline.camera_fps,
+            "manual_exposure": pipeline.camera_exposure,
+            "intrinsics_matrix": pipeline.K.tolist(),
+            "distortion_coefficients": pipeline.dist_coeffs.tolist(),
+        },
+        "tracker_names": [tracker.name for tracker in trackers],
+        "tracker_tag_ids": {
+            tracker.name: [int(tag_id) for tag_id in tracker.ids]
+            for tracker in trackers
+        },
+        "tracker_tag_to_object_transforms": {
+            tracker.name: {
+                str(tag_id): transform.tolist()
+                for tag_id, transform in tracker.offsets.items()
+            }
+            for tracker in trackers
+        },
+        "topology": {
+            "node_order": ["fruiting_base", "Branch", "Spur", "Apple"],
+            "woody_part_names": ["Branch", "Spur", "Apple"],
+            "start_nodes": ["fruiting_base", "Branch", "Spur"],
+            "end_nodes": ["Branch", "Spur", "Apple"],
+        },
+    }
+    dataCollector = DataCollector(metadata=tracking_metadata)
 
     try:
         while True:
@@ -182,21 +239,29 @@ def main():
             frame = np.asanyarray(color_frame.get_data())
             _, tag_dict = pipeline.process_frame(frame)
             pipeline.annotate_frame(frame, tag_dict)
+            frame_timestamp = time.time()
 
             for tracker in trackers:
                 x, y, z = tracker.pose['pos'] if tracker.pose is not None and tracker.pose['pos'] is not None else (0, 0, 0)
                 #try:
-                quat = R.from_matrix(tracker.pose['rot'],assume_valid=False).as_quat() if tracker.pose is not None and tracker.pose['rot'] is not None else (0, 0, 0, 1) # returns [x, y, z, w]
+                quat = R.from_matrix(tracker.pose['rot']).as_quat() if tracker.pose is not None and tracker.pose['rot'] is not None else (0, 0, 0, 1) # returns [x, y, z, w]
                 #finally:
                 #quat = (0, 0, 0, 1)
-                dataCollector.update(time.time() - start, tracker.name, x, y, z, quat[0], quat[1], quat[2], quat[3])
+                dataCollector.update(frame_timestamp, tracker.name, x, y, z, quat[0], quat[1], quat[2], quat[3])
 
             cv2.imshow("RealSense Tracker", frame)
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 break
     finally:
         #dataCollector.print()
-        dataCollector.dump()
+        dataCollector.dump(
+            args.output,
+            metadata={
+                "capture_end_timestamp": time.time(),
+                "row_count": len(dataCollector.rows),
+            },
+        )
+        print(f"Wrote tracking data to {args.output}")
         pipeline.pipeline.stop()
         cv2.destroyAllWindows()
 
