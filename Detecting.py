@@ -159,8 +159,8 @@ def main():
     #relationship between tags and offsets
 
     # second apple offset is for tag only 45 degrees from it
-    apple_offsets = [{"pos": [0, 0.0, .11], "rot": [[0.7071, 0, -0.7071], [0, 1,  0], [0.7071, 0,  0.7071]],},
-	        {"pos": [.09, 0, 0], "rot": [[-0.7071, 0, -0.7071], [0, 1,  0], [0.7071, 0,  -0.7071]]}]
+    apple_offsets = [{"pos": [0, 0.0, .11], "rot": [[-0.7071, 0, -0.7071], [0, 1,  0], [0.7071, 0,  -0.7071]],},
+	        {"pos": [.085, 0.00, 0.0], "rot": [[0.7071, 0, 0.7071], [0, 1,  0], [-0.7071, 0,  0.7071]]}]
     apple = Tracker.Tracker("Apple", ids=(7,6), id_offsets=apple_offsets)
 
     spur_offsets = [{"pos": [0.0, 0.01, 0.03], "rot": np.eye(3)},{"pos": [0.0, 0.01, 0.03], "rot": [[0, 0, -1], [0, 1,  0], [1, 0,  0]]},{"pos": [0.0, 0.01, 0.03], "rot": [[0, 0, 1], [0, 1,  0], [-1, 0,  0]]}]
