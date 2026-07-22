@@ -5,8 +5,10 @@ import numpy as np
 
 # BGR colors used for on-screen overlays.
 COLOR_TAG_OUTLINE = (0, 255, 0)
-COLOR_TRACKER_AXIS = (255, 0, 0)
-COLOR_TRACKER_ORIGIN = (0, 0, 255)
+COLOR_AXIS_X = (0, 0, 255)
+COLOR_AXIS_Y = (0, 255, 0)
+COLOR_AXIS_Z = (255, 0, 0)
+COLOR_TRACKER_ORIGIN = (255, 255, 255)
 COLOR_TEXT = (255, 255, 255)
 COLOR_WAITING = (0, 0, 255)
 
@@ -64,30 +66,45 @@ def draw_reference_axes(frame, camera_matrix, dist_coeffs, rvec, tvec, axis_leng
 def draw_tracker_overlay(
     frame, tracker, camera_matrix, dist_coeffs, rvec, tvec, axis_length=0.06
 ):
-    """Project a tracker's origin and +Z axis into the image."""
+    """Project a tracker's full local coordinate frame into the image."""
     position = np.asarray(tracker.pose["pos"], dtype=np.float64).reshape(1, 3)
     rotation = np.asarray(tracker.pose["rot"], dtype=np.float64)
 
     camera_matrix = np.asarray(camera_matrix, dtype=np.float64)
     dist_coeffs = np.asarray(dist_coeffs, dtype=np.float64)
 
-    # Object-frame origin and a point along +Z, transformed into reference frame.
-    axis_points_obj = np.array([[0, 0, 0], [0, 0, axis_length]], dtype=np.float64)
+    # Object-frame origin and unit-axis endpoints, transformed into reference frame.
+    axis_points_obj = np.array(
+        [
+            [0, 0, 0],  # origin
+            [axis_length, 0, 0],  # +X
+            [0, axis_length, 0],  # +Y
+            [0, 0, axis_length],  # +Z
+        ],
+        dtype=np.float64,
+    )
     axis_points_ref = (rotation @ axis_points_obj.T).T + position
 
     image_points, _ = cv2.projectPoints(
         axis_points_ref, rvec, tvec, camera_matrix, dist_coeffs
     )
     ox, oy = int(image_points[0, 0, 0]), int(image_points[0, 0, 1])
-    zx, zy = int(image_points[1, 0, 0]), int(image_points[1, 0, 1])
+    xx, xy = int(image_points[1, 0, 0]), int(image_points[1, 0, 1])
+    yx, yy = int(image_points[2, 0, 0]), int(image_points[2, 0, 1])
+    zx, zy = int(image_points[3, 0, 0]), int(image_points[3, 0, 1])
 
     height, width = frame.shape[:2]
-    clipped, start, end = cv2.clipLine((0, 0, width, height), (ox, oy), (zx, zy))
-    if clipped:
-        cv2.line(frame, start, end, COLOR_TRACKER_AXIS, 3)
+    for end_pt, color in (((xx, xy), COLOR_AXIS_X), ((yx, yy), COLOR_AXIS_Y), ((zx, zy), COLOR_AXIS_Z)):
+        clipped, start, end = cv2.clipLine((0, 0, width, height), (ox, oy), end_pt)
+        if clipped:
+            cv2.line(frame, start, end, color, 3)
 
     if 0 <= ox < width and 0 <= oy < height:
         cv2.circle(frame, (ox, oy), 5, COLOR_TRACKER_ORIGIN, -1)
+        cv2.putText(frame, "O", (ox + 4, oy - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.5, COLOR_TEXT, 1)
+        cv2.putText(frame, "X", (xx + 4, xy - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.5, COLOR_AXIS_X, 1)
+        cv2.putText(frame, "Y", (yx + 4, yy - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.5, COLOR_AXIS_Y, 1)
+        cv2.putText(frame, "Z", (zx + 4, zy - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.5, COLOR_AXIS_Z, 1)
 
         x, y, z = position[0]
         label = f"{tracker.name} (X:{x:+.2f}, Y:{y:+.2f}, Z:{z:+.2f})"

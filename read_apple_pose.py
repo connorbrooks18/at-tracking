@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import argparse
 import time
-import sys
 from pathlib import Path
+import sys
 
 import cv2
 import numpy as np
@@ -20,34 +20,21 @@ import pyrealsense2 as rs
 from pupil_apriltags import Detector
 from scipy.spatial.transform import Rotation as R
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+if str(REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPOSITORY_ROOT))
 
-import Tracker
-
-
+REFERENCE_TAG_ID = 1
 TAG_SIZE_M = 0.0170
-
-# Keep these aligned with at-tracking/Detecting.py.
-# The apple tags are currently tag 7 first and tag 6 second.
 APPLE_IDS = (7, 6)
-APPLE_OFFSETS = [
-    {
-        "pos": [0.0, 0.0, 0.11],
-        "rot": [
-            [0.7071, 0.0, -0.7071],
-            [0.0, 1.0, 0.0],
-            [0.7071, 0.0, 0.7071],
-        ],
-    },
-    {
-        "pos": [0.093, 0.003, -0.007],
-        "rot": [
-            [-0.7071, 0.0, -0.7071],
-            [0.0, 1.0, 0.0],
-            [0.7071, 0.0, -0.7071],
-        ],
-    },
-]
+APPLE_OFFSETS = (
+    {"pos": [0.0, 0.0, 0.11], "rot": [[-0.7071, 0, -0.7071], [0, 1, 0], [0.7071, 0, -0.7071]]},
+    {"pos": [0.085, 0.0, 0.0], "rot": [[0.7071, 0, -0.7071], [0, 1, 0], [0.7071, 0, 0.7071]]},
+)
+
+import Tracker  # noqa: E402
+
+TrackedObject = Tracker.Tracker
 
 # Assumed transform from tag frame to apple frame, expressed in tag coordinates.
 # This is the part to edit when testing a new physical tag mounting hypothesis.
@@ -115,7 +102,7 @@ def _tag_to_apple_transform():
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--reference-id", type=int, default=1)
+    parser.add_argument("--reference-id", type=int, default=REFERENCE_TAG_ID)
     parser.add_argument("--decision-margin", type=float, default=3.0)
     parser.add_argument("--camera-fps", type=int, default=15)
     parser.add_argument("--camera-width", type=int, default=1280)
@@ -129,7 +116,7 @@ def main() -> None:
     pipeline, camera_params = _init_camera(
         args.camera_fps, args.camera_width, args.camera_height, args.exposure
     )
-    apple = Tracker.Tracker("Apple", ids=APPLE_IDS, id_offsets=APPLE_OFFSETS)
+    apple = TrackedObject("Apple", APPLE_IDS, APPLE_OFFSETS)
 
     fused_pos_samples = []
     fused_quat_samples = []

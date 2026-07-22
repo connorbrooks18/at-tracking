@@ -31,7 +31,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from real_robot_exps.pro_robot_interface import FrankaInterface  # noqa: E402
 
-
 TAG_SIZE_M = 0.0170
 
 # Edit this block if the tag-to-base convention changes.

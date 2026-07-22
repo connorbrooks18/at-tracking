@@ -10,3 +10,5 @@ pyrealsense2
 python-dateutil
 scipy
 six
+pylibfranka
+torch

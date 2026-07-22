@@ -23,8 +23,9 @@ import pyrealsense2 as rs
 from pupil_apriltags import Detector
 from scipy.spatial.transform import Rotation as R
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+if str(REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPOSITORY_ROOT))
 
 TAG_SIZE_M = 0.0170
 

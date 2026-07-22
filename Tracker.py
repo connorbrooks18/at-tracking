@@ -27,10 +27,16 @@ class Tracker:
             name:       Display label for this object.
             ids:        AprilTag IDs attached to this object.
             id_offsets: Per-tag offset dicts with keys:
-                            'pos' — translation from tag center to object,
-                                    in tag coordinates (metres).
-                            'rot' — rotation from object frame to tag frame.
-                        See module docstring for full convention and examples.
+                            'pos' — translation from tag center to object origin,
+                                    expressed in the tag frame (metres).
+                            'rot' — 3x3 rotation used in the right-multiply chain
+                                    ``T_ref_obj = T_ref_tag @ offset``.
+                                    In other words, the stored matrix is the
+                                    tag-to-object attachment convention used by
+                                    this tracker pipeline, not a free-form world
+                                    rotation.
+                        Keep this aligned with ``T_ref_tag @ self.offsets[tag_id]``
+                        below.
         """
         self.name = name
         self.ids  = ids
@@ -42,7 +48,11 @@ class Tracker:
         }
 
     def updatePose(self, tags_in_ref):
-		# tags in ref gives list of tag poses in reference frame
+		# tags_in_ref gives tag poses expressed in the reference frame.
+        # We attach the object pose by right-multiplying the per-tag offset:
+        #   T_ref_obj = T_ref_tag @ offset
+        # so the offset must remain in the same convention used when it was
+        # authored in Detecting.py and related scripts.
 
         positions = []
         first_rot = None
@@ -71,5 +81,4 @@ class Tracker:
             "rot": first_rot,
         }
         return self.pose
-
 
