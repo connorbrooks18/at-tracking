@@ -33,7 +33,7 @@ class Detecting:
         self._init_camera()
         self.detector = Detector(families="tag36h11",
                                  quad_decimate=1.0,
-                                 nthreads=24,
+                                 nthreads=12,
                                  refine_edges=1,
                                  quad_sigma=0.2,
                                  decode_sharpening=1.0
@@ -159,8 +159,13 @@ def main():
     #relationship between tags and offsets
 
     # second apple offset is for tag only 45 degrees from it
-    apple_offsets = [{"pos": [0, 0.0, .11], "rot": [[-0.7071, 0, -0.7071], [0, 1,  0], [0.7071, 0,  -0.7071]],},
-	        {"pos": [.085, 0.00, 0.0], "rot": [[0.7071, 0, 0.7071], [0, 1,  0], [-0.7071, 0,  0.7071]]}]
+    apple_offsets = [
+        {"pos": [0, 0.0, .11], "rot": [[-0.7071, 0, -0.7071], [0, 1, 0], [0.7071, 0, -0.7071]]},
+        # Tag 6 uses the same apple convention as read_apple_pose.py: rotate
+        # -45 degrees about the tag's y axis so x/y stay consistent and z points
+        # the correct way in the right-handed frame.
+        {"pos": [.085, 0.00, 0.0], "rot": [[0.7071, 0, -0.7071], [0, 1, 0], [0.7071, 0, 0.7071]]},
+    ]
     apple = Tracker.Tracker("Apple", ids=(7,6), id_offsets=apple_offsets)
 
     spur_offsets = [{"pos": [0.0, 0.01, 0.03], "rot": np.eye(3)},{"pos": [0.0, 0.01, 0.03], "rot": [[0, 0, -1], [0, 1,  0], [1, 0,  0]]},{"pos": [0.0, 0.01, 0.03], "rot": [[0, 0, 1], [0, 1,  0], [-1, 0,  0]]}]

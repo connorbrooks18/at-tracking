@@ -61,6 +61,7 @@ COLOR_BRANCH = (0, 210, 255)    # yellow
 COLOR_SPUR = (0, 180, 0)        # green
 COLOR_APPLE_CHORD = (70, 70, 220)
 COLOR_TEXT = (245, 245, 245)
+COLOR_COORDS = (220, 220, 220)
 
 
 @dataclass(frozen=True)
@@ -211,6 +212,17 @@ def draw_point(frame, point_ref, label, color, rvec, tvec, camera_matrix, dist_c
     if _in_image(pixel, frame):
         cv2.circle(frame, pixel, 6, color, -1)
         cv2.putText(frame, label, (pixel[0] + 8, pixel[1] - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.48, color, 2)
+        coords = np.asarray(point_ref, dtype=np.float64).reshape(3)
+        coord_text = f"[{coords[0]:+.3f}, {coords[1]:+.3f}, {coords[2]:+.3f}] m"
+        cv2.putText(
+            frame,
+            coord_text,
+            (pixel[0] + 8, pixel[1] + 10),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.42,
+            COLOR_COORDS,
+            1,
+        )
     return pixel
 
 
@@ -236,6 +248,16 @@ def draw_pose_axes(frame, pose_ref, label, color, rvec, tvec, camera_matrix, dis
     origin_px = draw_point(frame, origin, label, color, rvec, tvec, camera_matrix, dist_coeffs)
     if origin_px is None:
         return
+    origin_text = f"{label} origin [{origin[0]:+.3f}, {origin[1]:+.3f}, {origin[2]:+.3f}] m"
+    cv2.putText(
+        frame,
+        origin_text,
+        (origin_px[0] + 8, origin_px[1] + 24),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.40,
+        COLOR_COORDS,
+        1,
+    )
     for axis, axis_color, axis_name in ((0, (0, 0, 255), "x"), (1, (0, 255, 0), "y"), (2, (255, 0, 0), "z")):
         tip_px = project_point(origin + rotation[:, axis] * AXIS_LEN_M, rvec, tvec, camera_matrix, dist_coeffs)
         height, width = frame.shape[:2]
