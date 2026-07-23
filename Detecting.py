@@ -152,6 +152,8 @@ class Detecting:
 def main():
     parser = argparse.ArgumentParser(description="Record AprilTag poses with Unix timestamps.")
     parser.add_argument("--output", default="output.parquet", help="Raw tracking Parquet path")
+    parser.add_argument("--headless", action=argparse.BooleanOptionalAction, default=True,
+                        help="Disable OpenCV GUI windows and run headless (default: true)")
     args = parser.parse_args()
 
     capture_start = time.time()
@@ -166,14 +168,14 @@ def main():
         # the correct way in the right-handed frame.
         {"pos": [.085, 0.00, 0.0], "rot": [[0.7071, 0, -0.7071], [0, 1, 0], [0.7071, 0, 0.7071]]},
     ]
-    apple = Tracker.Tracker("Apple", ids=(7,6), id_offsets=apple_offsets)
+    apple = Tracker.Tracker("Apple", ids=(7,0), id_offsets=apple_offsets)
 
     spur_offsets = [{"pos": [0.0, 0.01, 0.03], "rot": np.eye(3)},{"pos": [0.0, 0.01, 0.03], "rot": [[0, 0, -1], [0, 1,  0], [1, 0,  0]]},{"pos": [0.0, 0.01, 0.03], "rot": [[0, 0, 1], [0, 1,  0], [-1, 0,  0]]}]
     spur = Tracker.Tracker("Spur", ids=(3,4,5,), id_offsets=spur_offsets)
 
     branch_offsets = [
         {
-            "pos": [0, -0.01, 0.03],
+            "pos": [0, -0.03, 0.03],
             "rot": np.eye(3),
         },
     ]
@@ -254,9 +256,10 @@ def main():
                 #quat = (0, 0, 0, 1)
                 dataCollector.update(frame_timestamp, tracker.name, x, y, z, quat[0], quat[1], quat[2], quat[3])
 
-            cv2.imshow("RealSense Tracker", frame)
-            if cv2.waitKey(1) & 0xFF == ord("q"):
-                break
+            if not args.headless:
+                cv2.imshow("RealSense Tracker", frame)
+                if cv2.waitKey(1) & 0xFF == ord("q"):
+                    break
     finally:
         #dataCollector.print()
         dataCollector.dump(

@@ -275,6 +275,11 @@ def draw_unified_row(frame, row, base_to_reference_4x4, rvec, tvec, camera_matri
     draw_point(frame, tcp_ref, "TCP", COLOR_TCP, rvec, tvec, camera_matrix, dist_coeffs)
     draw_point(frame, apple_ref, "Apple", COLOR_APPLE, rvec, tvec, camera_matrix, dist_coeffs)
 
+    # TCP pose is stored in Franka base O frame; transform it with the same
+    # inverse calibration before projecting into the live reference-tag view.
+    tcp_pose_ref = pose_base_to_reference(row.get("tcp_pose_4x4"), base_to_reference_4x4)
+    draw_pose_axes(frame, tcp_pose_ref, "TCP pose", COLOR_TCP, rvec, tvec, camera_matrix, dist_coeffs)
+
     # The row stores the woody chord endpoints in `junction_names` order.
     # For replay we only render the two physical segments you care about:
     # Spur, then the Spur-to-Apple connection.
@@ -290,7 +295,7 @@ def draw_unified_row(frame, row, base_to_reference_4x4, rvec, tvec, camera_matri
         draw_line(frame, spur_end, apple_ref, "Apple", COLOR_APPLE_CHORD, rvec, tvec, camera_matrix, dist_coeffs)
         draw_point(frame, apple_ref, "Apple", COLOR_APPLE_CHORD, rvec, tvec, camera_matrix, dist_coeffs)
 
-    # Unlike tcp_pos, apple_pose_4x4 carries an orientation; show it when present.
+    # Apple_pose_4x4 carries an orientation; show it when present.
     apple_pose_ref = pose_base_to_reference(row.get("apple_pose_4x4"), base_to_reference_4x4)
     draw_pose_axes(frame, apple_pose_ref, "Apple pose", COLOR_APPLE, rvec, tvec, camera_matrix, dist_coeffs)
 
