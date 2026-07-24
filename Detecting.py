@@ -1,4 +1,6 @@
 import argparse
+import signal
+from threading import Event
 from pupil_apriltags import Detector
 import annotate
 import pyrealsense2 as rs
@@ -156,6 +158,14 @@ def main():
                         help="Disable OpenCV GUI windows and run headless (default: true)")
     args = parser.parse_args()
 
+    stop_requested = Event()
+
+    def _request_stop(signum, frame):  # noqa: ARG001
+        stop_requested.set()
+
+    signal.signal(signal.SIGINT, _request_stop)
+    signal.signal(signal.SIGTERM, _request_stop)
+
     capture_start = time.time()
 
     #relationship between tags and offsets
@@ -237,7 +247,7 @@ def main():
     dataCollector = DataCollector(metadata=tracking_metadata)
 
     try:
-        while True:
+        while not stop_requested.is_set():
             frames      = pipeline.pipeline.wait_for_frames()
             color_frame = frames.get_color_frame()
             if not color_frame:
@@ -259,7 +269,7 @@ def main():
             if not args.headless:
                 cv2.imshow("RealSense Tracker", frame)
                 if cv2.waitKey(1) & 0xFF == ord("q"):
-                    break
+                    stop_requested.set()
     finally:
         #dataCollector.print()
         dataCollector.dump(
@@ -267,6 +277,7 @@ def main():
             metadata={
                 "capture_end_timestamp": time.time(),
                 "row_count": len(dataCollector.rows),
+                "stop_requested": bool(stop_requested.is_set()),
             },
         )
         print(f"Wrote tracking data to {args.output}")
