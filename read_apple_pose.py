@@ -26,7 +26,7 @@ if str(REPOSITORY_ROOT) not in sys.path:
 
 REFERENCE_TAG_ID = 1
 TAG_SIZE_M = 0.0170
-APPLE_IDS = (7, 6)
+APPLE_IDS = (7, 0)
 APPLE_OFFSETS = (
     {"pos": [0.0, 0.0, 0.11], "rot": [[-0.7071, 0, -0.7071], [0, 1, 0], [0.7071, 0, -0.7071]]},
     {"pos": [0.085, 0.0, 0.0], "rot": [[0.7071, 0, -0.7071], [0, 1, 0], [0.7071, 0, 0.7071]]},
