@@ -185,7 +185,7 @@ def main():
 
     branch_offsets = [
         {
-            "pos": [0, -0.03, 0.03],
+            "pos": [0, -0.015, 0.03],
             "rot": np.eye(3),
         },
     ]
