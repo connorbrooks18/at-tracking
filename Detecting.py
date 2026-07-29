@@ -17,7 +17,6 @@ if str(REPOSITORY_ROOT) not in sys.path:
 
 from real_robot_exps.frame_transforms import (
     make_transform,
-    median_pose_4x4,
     pose_dict_to_transform,
     transform_pose_to_base,
 )
@@ -29,7 +28,6 @@ import Tracker
 
 # tag length in meters
 TAG_SIZE_M = 0.0170
-REFERENCE_TAG_ID = 1
 
 class Detecting:
     """RealSense capture, AprilTag detection, and base-frame tracking pipeline."""
@@ -223,7 +221,6 @@ def main():
     signal.signal(signal.SIGTERM, _request_stop)
 
     capture_start = time.time()
-    reference_tag_base_samples: list[np.ndarray] = []
 
     #relationship between tags and offsets
 
@@ -258,16 +255,10 @@ def main():
         decision_margin=3,
         use_reference_frame=bool(args.use_reference_frame),
     )
-    reference_tag_to_base = median_pose_4x4(reference_tag_base_samples)
-
     tracking_metadata = {
         "capture_start_timestamp": capture_start,
-        "reference_tag_id": pipeline.reference_id,
-        "reference_tag_enabled": bool(args.use_reference_frame),
-        "reference_tag_is_fruiting_base": bool(args.use_reference_frame),
         "coordinate_frame": "franka_base_o",
         "camera_to_base_4x4_used": CAMERA_TO_BASE_4X4_DEFAULT.tolist(),
-        "reference_tag_to_base_4x4_used": reference_tag_to_base.tolist() if reference_tag_to_base is not None else None,
         "position_unit": "m",
         "quaternion_order": "xyzw",
         "tag_family": "tag36h11",
@@ -315,18 +306,6 @@ def main():
             _, tag_dict = pipeline.process_frame(frame)
             pipeline.annotate_frame(frame, tag_dict)
             frame_timestamp = time.time()
-
-            if REFERENCE_TAG_ID in tag_dict:
-                ref_tag = tag_dict[REFERENCE_TAG_ID]
-                reference_tag_base_samples.append(
-                    transform_pose_to_base(
-                        {
-                            "pos": np.asarray(ref_tag.pose_t, dtype=np.float64).reshape(3),
-                            "rot": np.asarray(ref_tag.pose_R, dtype=np.float64),
-                        },
-                        camera_to_base=CAMERA_TO_BASE_4X4_DEFAULT,
-                    )
-                )
 
             for tracker in trackers:
                 pose_base = pipeline.pose_for_storage(tracker)

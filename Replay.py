@@ -1,9 +1,9 @@
 """Browse a unified system-ID Parquet episode over a live RealSense feed.
 
 The unified file stores robot and camera-derived geometry in Franka base O.
-For replay, this script reads the reference-tag-to-base calibration saved in
-the Parquet metadata, inverts it, and projects the resulting reference-tag
-coordinates onto the *current* camera image.  Keep the reference tag visible.
+For replay, this script reads the saved camera-to-base calibration from the
+Parquet metadata, inverts it, and projects the base-frame geometry onto the
+current camera image.
 
 The replay overlay follows the compiler topology directly:
 three woody chords are stored in `woody_part_start_pos` / `woody_part_end_pos`
@@ -40,19 +40,9 @@ import pyarrow.parquet as pq
 
 try:
     import pyrealsense2 as rs
-    from pupil_apriltags import Detector
 except ImportError:  # Allows schema/calibration helpers to be used headlessly.
     rs = None
-    Detector = None
 
-# Keep these values local to the standalone replay tool. The robot package has
-# no camera-runtime dependency.
-TAG_SIZE_M = 0.0170
-REFERENCE_TAG_ID = 1
-
-# Must match the physical reference tag used by the tracker/compiled episode.
-REFERENCE_ID = REFERENCE_TAG_ID
-DECISION_MARGIN = 5
 AXIS_LEN_M = 0.040
 
 COLOR_TCP = (255, 255, 0)       # cyan, BGR
@@ -66,10 +56,10 @@ COLOR_COORDS = (220, 220, 220)
 
 @dataclass(frozen=True)
 class UnifiedEpisode:
-    """Rows and the calibration needed to put base-O points back in tag frame."""
+    """Rows and the calibration needed to put base-O points back in camera frame."""
 
     rows: list[dict]
-    base_to_reference_4x4: np.ndarray
+    base_to_camera_4x4: np.ndarray
     episode_id: str
     junction_names: tuple[str, ...]
 
@@ -89,30 +79,6 @@ def init_camera():
     return pipeline, camera_matrix, np.zeros(5, dtype=np.float64), (intr.fx, intr.fy, intr.ppx, intr.ppy)
 
 
-def init_detector():
-    if Detector is None:
-        raise RuntimeError("Replay needs pupil_apriltags; run it in the AprilTag environment.")
-    return Detector(
-        families="tag36h11",
-        quad_decimate=1.0,
-        nthreads=24,
-        refine_edges=1,
-        quad_sigma=0.2,
-        decode_sharpening=1.0,
-    )
-
-
-def get_reference_extrinsics(frame, detector, camera_params):
-    """Return camera<-reference rvec/tvec for the currently detected reference tag."""
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    tags = detector.detect(gray, estimate_tag_pose=True, camera_params=camera_params, tag_size=TAG_SIZE_M)
-    for tag in tags:
-        if tag.tag_id == REFERENCE_ID and tag.decision_margin > DECISION_MARGIN:
-            rvec, _ = cv2.Rodrigues(np.asarray(tag.pose_R, dtype=np.float64))
-            return rvec, np.asarray(tag.pose_t, dtype=np.float64).reshape(3, 1)
-    return None, None
-
-
 def _dataset_metadata(path: Path) -> dict:
     metadata = pq.read_schema(path).metadata or {}
     raw = metadata.get(b"dataset_metadata")
@@ -125,7 +91,7 @@ def _dataset_metadata(path: Path) -> dict:
 
 
 def load_unified_episode(filename: str) -> UnifiedEpisode:
-    """Load a unified episode and invert its saved reference-tag calibration."""
+    """Load a unified episode and invert its saved camera-to-base calibration."""
     path = Path(filename)
     table = pq.read_table(path)
     required = {"timestamp", "tcp_pos", "apple_pos", "woody_part_start_pos", "woody_part_end_pos"}
@@ -139,17 +105,17 @@ def load_unified_episode(filename: str) -> UnifiedEpisode:
     metadata = _dataset_metadata(path)
     topology = metadata.get("topology", {})
     junction_names = tuple(topology.get("junction_names", ("Branch", "Spur", "Apple")))
-    tag_to_base = metadata.get("reference_tag_to_base_4x4_used", metadata.get("reference_tag_to_base_4x4"))
-    if tag_to_base is None:
+    camera_to_base = metadata.get("camera_to_base_4x4_used", metadata.get("camera_to_base_4x4"))
+    if camera_to_base is None:
         raise ValueError(
-            "Unified Parquet metadata has no reference_tag_to_base_4x4_used calibration. "
+            "Unified Parquet metadata has no camera_to_base_4x4_used calibration. "
             "Recompile the episode with compile_static_sysid.py."
         )
-    tag_to_base = np.asarray(tag_to_base, dtype=np.float64)
-    if tag_to_base.shape != (4, 4) or not np.isfinite(tag_to_base).all():
-        raise ValueError("reference_tag_to_base_4x4_used must be a finite 4x4 matrix")
-    if abs(float(np.linalg.det(tag_to_base[:3, :3]))) < 1e-10:
-        raise ValueError("reference_tag_to_base_4x4_used has a non-invertible rotation block")
+    camera_to_base = np.asarray(camera_to_base, dtype=np.float64)
+    if camera_to_base.shape != (4, 4) or not np.isfinite(camera_to_base).all():
+        raise ValueError("camera_to_base_4x4_used must be a finite 4x4 matrix")
+    if abs(float(np.linalg.det(camera_to_base[:3, :3]))) < 1e-10:
+        raise ValueError("camera_to_base_4x4_used has a non-invertible rotation block")
 
     rows = table.to_pylist()
     if not rows:
@@ -157,7 +123,7 @@ def load_unified_episode(filename: str) -> UnifiedEpisode:
     rows.sort(key=lambda row: float(row["timestamp"]))
     return UnifiedEpisode(
         rows=rows,
-        base_to_reference_4x4=np.linalg.inv(tag_to_base),
+        base_to_camera_4x4=np.linalg.inv(camera_to_base),
         episode_id=str(metadata.get("episode_id", rows[0].get("episode_id", ""))),
         junction_names=junction_names,
     )
@@ -172,30 +138,36 @@ def _as_point(value) -> np.ndarray | None:
     return point
 
 
-def point_base_to_reference(point_base, base_to_reference_4x4: np.ndarray) -> np.ndarray | None:
-    """Transform one 3-D base-O point into the reference-tag coordinate frame."""
+def point_base_to_camera(point_base, base_to_camera_4x4: np.ndarray) -> np.ndarray | None:
+    """Transform one 3-D base-O point into the camera coordinate frame."""
     point = _as_point(point_base)
     if point is None:
         return None
-    homogeneous = base_to_reference_4x4 @ np.append(point, 1.0)
+    homogeneous = base_to_camera_4x4 @ np.append(point, 1.0)
     if abs(homogeneous[3]) < 1e-12:
         return None
     return homogeneous[:3] / homogeneous[3]
 
 
-def pose_base_to_reference(pose_base, base_to_reference_4x4: np.ndarray) -> np.ndarray | None:
-    """Transform a row-major 4x4 base-O pose into reference-tag coordinates."""
+def pose_base_to_camera(pose_base, base_to_camera_4x4: np.ndarray) -> np.ndarray | None:
+    """Transform a row-major 4x4 base-O pose into camera coordinates."""
     if pose_base is None:
         return None
     pose = np.asarray(pose_base, dtype=np.float64)
     if pose.size != 16 or not np.isfinite(pose).all():
         return None
-    return base_to_reference_4x4 @ pose.reshape(4, 4)
+    return base_to_camera_4x4 @ pose.reshape(4, 4)
 
 
-def project_point(point_ref, rvec, tvec, camera_matrix, dist_coeffs):
-    point = np.asarray(point_ref, dtype=np.float64).reshape(1, 3)
-    projected, _ = cv2.projectPoints(point, rvec, tvec, camera_matrix, dist_coeffs)
+def project_point(point_cam, camera_matrix, dist_coeffs):
+    point = np.asarray(point_cam, dtype=np.float64).reshape(1, 3)
+    projected, _ = cv2.projectPoints(
+        point,
+        np.zeros(3, dtype=np.float64),
+        np.zeros(3, dtype=np.float64),
+        camera_matrix,
+        dist_coeffs,
+    )
     return tuple(np.rint(projected[0, 0]).astype(int))
 
 
@@ -205,14 +177,14 @@ def _in_image(point, frame) -> bool:
     return 0 <= x < width and 0 <= y < height
 
 
-def draw_point(frame, point_ref, label, color, rvec, tvec, camera_matrix, dist_coeffs):
-    if point_ref is None:
+def draw_point(frame, point_cam, label, color, camera_matrix, dist_coeffs):
+    if point_cam is None:
         return None
-    pixel = project_point(point_ref, rvec, tvec, camera_matrix, dist_coeffs)
+    pixel = project_point(point_cam, camera_matrix, dist_coeffs)
     if _in_image(pixel, frame):
         cv2.circle(frame, pixel, 6, color, -1)
         cv2.putText(frame, label, (pixel[0] + 8, pixel[1] - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.48, color, 2)
-        coords = np.asarray(point_ref, dtype=np.float64).reshape(3)
+        coords = np.asarray(point_cam, dtype=np.float64).reshape(3)
         coord_text = f"[{coords[0]:+.3f}, {coords[1]:+.3f}, {coords[2]:+.3f}] m"
         cv2.putText(
             frame,
@@ -226,11 +198,11 @@ def draw_point(frame, point_ref, label, color, rvec, tvec, camera_matrix, dist_c
     return pixel
 
 
-def draw_line(frame, start_ref, end_ref, label, color, rvec, tvec, camera_matrix, dist_coeffs):
-    if start_ref is None or end_ref is None:
+def draw_line(frame, start_cam, end_cam, label, color, camera_matrix, dist_coeffs):
+    if start_cam is None or end_cam is None:
         return
-    start_px = project_point(start_ref, rvec, tvec, camera_matrix, dist_coeffs)
-    end_px = project_point(end_ref, rvec, tvec, camera_matrix, dist_coeffs)
+    start_px = project_point(start_cam, camera_matrix, dist_coeffs)
+    end_px = project_point(end_cam, camera_matrix, dist_coeffs)
     height, width = frame.shape[:2]
     clipped, start_px, end_px = cv2.clipLine((0, 0, width, height), start_px, end_px)
     if clipped:
@@ -239,13 +211,13 @@ def draw_line(frame, start_ref, end_ref, label, color, rvec, tvec, camera_matrix
         cv2.putText(frame, label, midpoint, cv2.FONT_HERSHEY_SIMPLEX, 0.44, color, 2)
 
 
-def draw_pose_axes(frame, pose_ref, label, color, rvec, tvec, camera_matrix, dist_coeffs):
-    """Draw an origin and RGB local axes from a reference-frame 4x4 pose."""
-    if pose_ref is None:
+def draw_pose_axes(frame, pose_cam, label, color, camera_matrix, dist_coeffs):
+    """Draw an origin and RGB local axes from a camera-frame 4x4 pose."""
+    if pose_cam is None:
         return
-    origin = pose_ref[:3, 3]
-    rotation = pose_ref[:3, :3]
-    origin_px = draw_point(frame, origin, label, color, rvec, tvec, camera_matrix, dist_coeffs)
+    origin = pose_cam[:3, 3]
+    rotation = pose_cam[:3, :3]
+    origin_px = draw_point(frame, origin, label, color, camera_matrix, dist_coeffs)
     if origin_px is None:
         return
     origin_text = f"{label} origin [{origin[0]:+.3f}, {origin[1]:+.3f}, {origin[2]:+.3f}] m"
@@ -259,7 +231,7 @@ def draw_pose_axes(frame, pose_ref, label, color, rvec, tvec, camera_matrix, dis
         1,
     )
     for axis, axis_color, axis_name in ((0, (0, 0, 255), "x"), (1, (0, 255, 0), "y"), (2, (255, 0, 0), "z")):
-        tip_px = project_point(origin + rotation[:, axis] * AXIS_LEN_M, rvec, tvec, camera_matrix, dist_coeffs)
+        tip_px = project_point(origin + rotation[:, axis] * AXIS_LEN_M, camera_matrix, dist_coeffs)
         height, width = frame.shape[:2]
         clipped, line_start, line_end = cv2.clipLine((0, 0, width, height), origin_px, tip_px)
         if clipped:
@@ -268,17 +240,17 @@ def draw_pose_axes(frame, pose_ref, label, color, rvec, tvec, camera_matrix, dis
                 cv2.putText(frame, axis_name, (tip_px[0] + 3, tip_px[1] - 3), cv2.FONT_HERSHEY_SIMPLEX, 0.43, axis_color, 1)
 
 
-def draw_unified_row(frame, row, base_to_reference_4x4, rvec, tvec, camera_matrix, dist_coeffs):
+def draw_unified_row(frame, row, base_to_camera_4x4, camera_matrix, dist_coeffs):
     """Overlay every spatial unified-data field that can be projected meaningfully."""
-    tcp_ref = point_base_to_reference(row.get("tcp_pos"), base_to_reference_4x4)
-    apple_ref = point_base_to_reference(row.get("apple_pos"), base_to_reference_4x4)
-    draw_point(frame, tcp_ref, "TCP", COLOR_TCP, rvec, tvec, camera_matrix, dist_coeffs)
-    draw_point(frame, apple_ref, "Apple", COLOR_APPLE, rvec, tvec, camera_matrix, dist_coeffs)
+    tcp_cam = point_base_to_camera(row.get("tcp_pos"), base_to_camera_4x4)
+    apple_cam = point_base_to_camera(row.get("apple_pos"), base_to_camera_4x4)
+    draw_point(frame, tcp_cam, "TCP", COLOR_TCP, camera_matrix, dist_coeffs)
+    draw_point(frame, apple_cam, "Apple", COLOR_APPLE, camera_matrix, dist_coeffs)
 
-    # TCP pose is stored in Franka base O frame; transform it with the same
-    # inverse calibration before projecting into the live reference-tag view.
-    tcp_pose_ref = pose_base_to_reference(row.get("tcp_pose_4x4"), base_to_reference_4x4)
-    draw_pose_axes(frame, tcp_pose_ref, "TCP pose", COLOR_TCP, rvec, tvec, camera_matrix, dist_coeffs)
+    # TCP pose is stored in Franka base O frame; transform it with the saved
+    # camera calibration before projecting into the live image.
+    tcp_pose_cam = pose_base_to_camera(row.get("tcp_pose_4x4"), base_to_camera_4x4)
+    draw_pose_axes(frame, tcp_pose_cam, "TCP pose", COLOR_TCP, camera_matrix, dist_coeffs)
 
     # The row stores the woody chord endpoints in `junction_names` order.
     # For replay we only render the two physical segments you care about:
@@ -286,18 +258,18 @@ def draw_unified_row(frame, row, base_to_reference_4x4, rvec, tvec, camera_matri
     starts = np.asarray(row.get("woody_part_start_pos", []), dtype=np.float64).reshape(-1)
     ends = np.asarray(row.get("woody_part_end_pos", []), dtype=np.float64).reshape(-1)
     if starts.size == 9 and ends.size == 9:
-        spur_start = point_base_to_reference(starts[0:3], base_to_reference_4x4)
-        spur_end = point_base_to_reference(ends[0:3], base_to_reference_4x4)
-        draw_line(frame, spur_start, spur_end, "Spur", COLOR_SPUR, rvec, tvec, camera_matrix, dist_coeffs)
-        draw_point(frame, spur_start, "Spur start", COLOR_SPUR, rvec, tvec, camera_matrix, dist_coeffs)
-        draw_point(frame, spur_end, "Spur end", COLOR_SPUR, rvec, tvec, camera_matrix, dist_coeffs)
+        spur_start = point_base_to_camera(starts[0:3], base_to_camera_4x4)
+        spur_end = point_base_to_camera(ends[0:3], base_to_camera_4x4)
+        draw_line(frame, spur_start, spur_end, "Spur", COLOR_SPUR, camera_matrix, dist_coeffs)
+        draw_point(frame, spur_start, "Spur start", COLOR_SPUR, camera_matrix, dist_coeffs)
+        draw_point(frame, spur_end, "Spur end", COLOR_SPUR, camera_matrix, dist_coeffs)
 
-        draw_line(frame, spur_end, apple_ref, "Apple", COLOR_APPLE_CHORD, rvec, tvec, camera_matrix, dist_coeffs)
-        draw_point(frame, apple_ref, "Apple", COLOR_APPLE_CHORD, rvec, tvec, camera_matrix, dist_coeffs)
+        draw_line(frame, spur_end, apple_cam, "Apple", COLOR_APPLE_CHORD, camera_matrix, dist_coeffs)
+        draw_point(frame, apple_cam, "Apple", COLOR_APPLE_CHORD, camera_matrix, dist_coeffs)
 
     # Apple_pose_4x4 carries an orientation; show it when present.
-    apple_pose_ref = pose_base_to_reference(row.get("apple_pose_4x4"), base_to_reference_4x4)
-    draw_pose_axes(frame, apple_pose_ref, "Apple pose", COLOR_APPLE, rvec, tvec, camera_matrix, dist_coeffs)
+    apple_pose_cam = pose_base_to_camera(row.get("apple_pose_4x4"), base_to_camera_4x4)
+    draw_pose_axes(frame, apple_pose_cam, "Apple pose", COLOR_APPLE, camera_matrix, dist_coeffs)
 
 
 def _timestamp(row) -> float:
@@ -328,8 +300,8 @@ def main():
     args = parser.parse_args()
     if args.speed <= 0:
         parser.error("--speed must be positive")
-    if rs is None or Detector is None:
-        print("[ERROR] Replay needs both pyrealsense2 and pupil_apriltags in the active Python environment.")
+    if rs is None:
+        print("[ERROR] Replay needs pyrealsense2 in the active Python environment.")
         sys.exit(1)
 
     try:
@@ -340,11 +312,10 @@ def main():
 
     print(f"Loaded {len(episode.rows)} unified rows from {args.filename}")
     print(f"episode_id: {episode.episode_id or '(not recorded)'}")
-    print("Using inverse of metadata reference_tag_to_base_4x4_used (base O -> reference tag).")
-    print("Keep reference tag ID=1 visible. Controls: Space play/pause, arrows or a/d step, r/Home first, End last, +/- speed, q quit.")
+    print("Using inverse of metadata camera_to_base_4x4_used (base O -> camera).")
+    print("Controls: Space play/pause, arrows or a/d step, r/Home first, End last, +/- speed, q quit.")
 
-    pipeline, camera_matrix, dist_coeffs, camera_params = init_camera()
-    detector = init_detector()
+    pipeline, camera_matrix, dist_coeffs, _ = init_camera()
     index = 0
     paused = True
     speed = float(args.speed)
@@ -378,13 +349,7 @@ def main():
                     else:
                         paused = True
 
-            rvec, tvec = get_reference_extrinsics(frame, detector, camera_params)
-            if rvec is None:
-                cv2.putText(frame, f"Waiting for reference tag ID={REFERENCE_ID}", (20, 38), cv2.FONT_HERSHEY_SIMPLEX, 0.70, (0, 0, 255), 2)
-            else:
-                cv2.drawFrameAxes(frame, camera_matrix, dist_coeffs, rvec, tvec, 0.05, 2)
-                cv2.putText(frame, "Reference tag frame", (20, 38), cv2.FONT_HERSHEY_SIMPLEX, 0.56, COLOR_TEXT, 2)
-                draw_unified_row(frame, episode.rows[index], episode.base_to_reference_4x4, rvec, tvec, camera_matrix, dist_coeffs)
+            draw_unified_row(frame, episode.rows[index], episode.base_to_camera_4x4, camera_matrix, dist_coeffs)
 
             row = episode.rows[index]
             elapsed = _timestamp(row) - _timestamp(episode.rows[0])
