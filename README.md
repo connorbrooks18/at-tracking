@@ -18,6 +18,13 @@ python Detecting.py --output tracking.parquet
 # Add --no-display for headless collection.
 ```
 
+Integrated collection keeps this detector as the sole RealSense owner. The
+runner may start it with `--snapshot-request REQUEST --snapshot-output OUTPUT`.
+When the robot process creates `REQUEST`, the detector writes one current
+Branch/Spur/Apple snapshot to `OUTPUT` and removes the request file. This is
+used after grasp closure so the apple position reflects movement with the
+grasp; a second camera pipeline must not be started during the run.
+
 The window shows the live overlay in either camera space or an alternate
 object-aligned overlay, depending on the `--use-reference-frame` flag. Axis
 colors are X red, Y green, and Z blue. In this standalone wrapper, `q`/Escape
