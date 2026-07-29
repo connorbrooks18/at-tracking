@@ -1,21 +1,38 @@
 import argparse
 import signal
+import sys
 from threading import Event
-from pupil_apriltags import Detector # type: ignore
-import annotate
-import pyrealsense2 as rs
+import time
+from pathlib import Path
+
+import numpy as np
 import cv2
+import pyrealsense2 as rs
+from pupil_apriltags import Detector # type: ignore
+from scipy.spatial.transform import Rotation as R
+
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+if str(REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPOSITORY_ROOT))
+
+from real_robot_exps.frame_transforms import (
+    make_transform,
+    median_pose_4x4,
+    pose_dict_to_transform,
+    transform_pose_to_base,
+)
+from real_robot_exps.static_constants import CAMERA_TO_BASE_4X4_DEFAULT
+
+import annotate
 from DataCollector import DataCollector
 import Tracker
-import time
-import numpy as np
-from scipy.spatial.transform import Rotation as R
 
 # tag length in meters
 TAG_SIZE_M = 0.0170
+REFERENCE_TAG_ID = 1
 
 class Detecting:
-    """RealSense capture, AprilTag detection, and reference-frame tracking pipeline."""
+    """RealSense capture, AprilTag detection, and base-frame tracking pipeline."""
 
     def __init__(
         self,
@@ -32,9 +49,9 @@ class Detecting:
                              Should be fixed and reliably visible at all times.
             trackers:        Tracker instances to update each frame.
             decision_margin: Minimum detector confidence (higher = stricter).
-            use_reference_frame: When True, express tracked poses in the
-                reference-tag frame. When False, keep everything in the camera
-                frame and treat the reference tag as optional/disabled.
+            use_reference_frame: When True, draw tracker overlays in the
+                reference-tag frame if the reference tag is visible. Saved
+                parquet rows are still written in the Franka base frame.
         """
         self.allowed_ids         = allowed_ids
         self.reference_id        = reference_id
@@ -163,6 +180,23 @@ class Detecting:
             }
         return tags_in_ref
 
+    def pose_for_storage(self, tracker):
+        """Return a tracker pose as a 4x4 transform in the Franka base frame."""
+        if tracker.pose is None:
+            return None
+
+        if self.use_reference_frame and self.last_reference_pose is not None:
+            cam_T_ref = make_transform(
+                np.asarray(self.last_reference_pose.pose_R, dtype=np.float64),
+                np.asarray(self.last_reference_pose.pose_t, dtype=np.float64).reshape(3),
+            )
+            ref_T_obj = pose_dict_to_transform(tracker.pose)
+            cam_pose = cam_T_ref @ ref_T_obj
+            pose_camera = {"pos": cam_pose[:3, 3], "rot": cam_pose[:3, :3]}
+            return transform_pose_to_base(pose_camera)
+
+        return transform_pose_to_base(tracker.pose)
+
 
 
 # USAGE BELOW
@@ -176,7 +210,7 @@ def main():
         "--use-reference-frame",
         action=argparse.BooleanOptionalAction,
         default=False,
-        help="Express tracker output in the reference-tag frame instead of the camera frame",
+        help="Draw the live overlay in the reference-tag frame instead of the camera frame",
     )
     args = parser.parse_args()
 
@@ -189,6 +223,7 @@ def main():
     signal.signal(signal.SIGTERM, _request_stop)
 
     capture_start = time.time()
+    reference_tag_base_samples: list[np.ndarray] = []
 
     #relationship between tags and offsets
 
@@ -223,15 +258,16 @@ def main():
         decision_margin=3,
         use_reference_frame=bool(args.use_reference_frame),
     )
+    reference_tag_to_base = median_pose_4x4(reference_tag_base_samples)
 
-    output_frame = "reference_apriltag" if args.use_reference_frame else "camera_color_optical_frame"
     tracking_metadata = {
         "capture_start_timestamp": capture_start,
         "reference_tag_id": pipeline.reference_id,
         "reference_tag_enabled": bool(args.use_reference_frame),
         "reference_tag_is_fruiting_base": bool(args.use_reference_frame),
-        "fruiting_base_pos": [0.0, 0.0, 0.0] if args.use_reference_frame else None,
-        "coordinate_frame": output_frame,
+        "coordinate_frame": "franka_base_o",
+        "camera_to_base_4x4_used": CAMERA_TO_BASE_4X4_DEFAULT.tolist(),
+        "reference_tag_to_base_4x4_used": reference_tag_to_base.tolist() if reference_tag_to_base is not None else None,
         "position_unit": "m",
         "quaternion_order": "xyzw",
         "tag_family": "tag36h11",
@@ -260,9 +296,9 @@ def main():
             for tracker in trackers
         },
         "topology": {
-            "node_order": (["fruiting_base"] if args.use_reference_frame else []) + ["Branch", "Spur", "Apple"],
+            "node_order": ["Branch", "Spur", "Apple"],
             "woody_part_names": ["Branch", "Spur", "Apple"],
-            "start_nodes": (["fruiting_base"] if args.use_reference_frame else []) + ["Branch", "Spur"],
+            "start_nodes": ["Branch", "Spur"],
             "end_nodes": ["Branch", "Spur", "Apple"],
         },
     }
@@ -280,12 +316,24 @@ def main():
             pipeline.annotate_frame(frame, tag_dict)
             frame_timestamp = time.time()
 
+            if REFERENCE_TAG_ID in tag_dict:
+                ref_tag = tag_dict[REFERENCE_TAG_ID]
+                reference_tag_base_samples.append(
+                    transform_pose_to_base(
+                        {
+                            "pos": np.asarray(ref_tag.pose_t, dtype=np.float64).reshape(3),
+                            "rot": np.asarray(ref_tag.pose_R, dtype=np.float64),
+                        },
+                        camera_to_base=CAMERA_TO_BASE_4X4_DEFAULT,
+                    )
+                )
+
             for tracker in trackers:
-                x, y, z = tracker.pose['pos'] if tracker.pose is not None and tracker.pose['pos'] is not None else (0, 0, 0)
-                #try:
-                quat = R.from_matrix(tracker.pose['rot']).as_quat() if tracker.pose is not None and tracker.pose['rot'] is not None else (0, 0, 0, 1) # returns [x, y, z, w]
-                #finally:
-                #quat = (0, 0, 0, 1)
+                pose_base = pipeline.pose_for_storage(tracker)
+                if pose_base is None:
+                    continue
+                x, y, z = pose_base[:3, 3]
+                quat = R.from_matrix(pose_base[:3, :3]).as_quat()
                 dataCollector.update(frame_timestamp, tracker.name, x, y, z, quat[0], quat[1], quat[2], quat[3])
 
             if not args.headless:

@@ -8,7 +8,9 @@ The active detector, tag IDs, tag-to-object transforms, pose math, live overlay,
 and Parquet writer now live in
 the standalone `Detecting.py` pipeline. `Detecting.py` is the standalone launcher
 around that shared module, so standalone checks and integrated pull collection
-use identical tracking logic.
+use identical tracking logic. The saved Parquet rows are always written in the
+Franka base frame; the camera-to-base calibration is applied once in the
+tracking writer and then carried forward as metadata for replay/debugging.
 
 ```bash
 cd at-tracking
@@ -16,10 +18,11 @@ python Detecting.py --output tracking.parquet
 # Add --no-display for headless collection.
 ```
 
-The window shows reference-frame positions and XYZ Euler orientations for
-Branch, Spur, and Apple. Axis colors are X red, Y green, and Z blue. In this
-standalone wrapper, `q`/Escape ends collection and writes the file; in the
-integrated pull test, those keys only hide the diagnostic window.
+The window shows the live overlay in either camera or reference-tag space,
+depending on the `--use-reference-frame` flag. Axis colors are X red, Y green,
+and Z blue. In this standalone wrapper, `q`/Escape ends collection and writes
+the file; in the integrated pull test, those keys only hide the diagnostic
+window.
 ## Unified Parquet replay
 
 `Replay.py` browses a compiled unified system-ID Parquet over the current
@@ -34,9 +37,10 @@ python Replay.py ../pull_unified.parquet
 The unified file stores geometry in Franka base `O`. Replay reads the
 run-specific `reference_tag_to_base_4x4_used` matrix from its metadata,
 inverts it (`base O -> reference tag`), and projects TCP, apple, apple axes,
-and all Branch/Spur/Apple woody start/end chords onto the live image. It does
-not use the current compiler default transform, so an older unified file is
-replayed with the calibration recorded inside that file.
+and all Branch/Spur/Apple woody start/end chords onto the live image. The
+tracking writer now stores the actual reference-tag calibration in metadata
+when the tag is visible, and the tracking compiler refuses non-base input
+instead of silently reinterpreting it.
 
 Controls: `Space` play/pause; `Right`/`d` and `Left`/`a` step one saved row;
 `Home`/`r` first row; `End` last row; `+`/`-` change speed; `q`/`Esc` quit.
