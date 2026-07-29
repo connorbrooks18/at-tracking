@@ -1,4 +1,5 @@
 import argparse
+import json
 import signal
 import sys
 from threading import Event
@@ -202,6 +203,8 @@ class Detecting:
 def main():
     parser = argparse.ArgumentParser(description="Record AprilTag poses with Unix timestamps.")
     parser.add_argument("--output", default="output.parquet", help="Raw tracking Parquet path")
+    parser.add_argument("--snapshot-request", default=None, help="File to poll for one-shot snapshot requests")
+    parser.add_argument("--snapshot-output", default=None, help="JSON path for the requested one-shot snapshot")
     parser.add_argument("--headless", action=argparse.BooleanOptionalAction, default=True,
                         help="Disable OpenCV GUI windows and run headless (default: true)")
     parser.add_argument(
@@ -295,6 +298,37 @@ def main():
     }
     dataCollector = DataCollector(metadata=tracking_metadata)
 
+    def _write_requested_snapshot(poses, timestamp):
+        if not args.snapshot_request or not args.snapshot_output or not Path(args.snapshot_request).exists():
+            return
+        if not all(name in poses for name in ("Branch", "Spur", "Apple")):
+            return
+        positions = {name: pose[:3, 3].astype(float).tolist() for name, pose in poses.items()}
+        starts = np.asarray([positions["Branch"], positions["Branch"], positions["Spur"]], dtype=float)
+        ends = np.asarray([positions["Spur"], positions["Apple"], positions["Apple"]], dtype=float)
+        snapshot = {
+            "timestamp": float(timestamp),
+            "camera_frame_count": 1,
+            "camera_to_base_4x4": CAMERA_TO_BASE_4X4_DEFAULT.tolist(),
+            "apple_pos": positions["Apple"],
+            "apple_pose_4x4": poses["Apple"].reshape(-1).astype(float).tolist(),
+            "apple_quat_xyzw": R.from_matrix(poses["Apple"][:3, :3]).as_quat().astype(float).tolist(),
+            "branch_pos": positions["Branch"],
+            "branch_pose_4x4": poses["Branch"].reshape(-1).astype(float).tolist(),
+            "spur_pos": positions["Spur"],
+            "spur_pose_4x4": poses["Spur"].reshape(-1).astype(float).tolist(),
+            "woody_part_start_pos": starts.reshape(-1).tolist(),
+            "woody_part_end_pos": ends.reshape(-1).tolist(),
+            "woody_bending_angles": [0.0, 0.0, 0.0],
+            "source": "running_detector_snapshot_request",
+        }
+        output_path = Path(args.snapshot_output)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary_path = output_path.with_suffix(output_path.suffix + ".tmp")
+        temporary_path.write_text(json.dumps(snapshot), encoding="utf-8")
+        temporary_path.replace(output_path)
+        Path(args.snapshot_request).unlink(missing_ok=True)
+
     try:
         while not stop_requested.is_set():
             frames      = pipeline.pipeline.wait_for_frames()
@@ -307,13 +341,18 @@ def main():
             pipeline.annotate_frame(frame, tag_dict)
             frame_timestamp = time.time()
 
+            current_poses = {}
+
             for tracker in trackers:
                 pose_base = pipeline.pose_for_storage(tracker)
                 if pose_base is None:
                     continue
+                current_poses[tracker.name] = pose_base.copy()
                 x, y, z = pose_base[:3, 3]
                 quat = R.from_matrix(pose_base[:3, :3]).as_quat()
                 dataCollector.update(frame_timestamp, tracker.name, x, y, z, quat[0], quat[1], quat[2], quat[3])
+
+            _write_requested_snapshot(current_poses, frame_timestamp)
 
             if not args.headless:
                 cv2.imshow("RealSense Tracker", frame)
