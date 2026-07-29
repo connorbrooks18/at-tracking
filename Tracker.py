@@ -48,11 +48,11 @@ class Tracker:
         }
 
     def updatePose(self, tags_in_ref):
-		# tags_in_ref gives tag poses expressed in the reference frame.
+		# tags_in_ref gives tag poses expressed in the same frame as the
+        # downstream output. When reference-tag mode is disabled, that is the
+        # camera frame; when enabled, it is the reference-tag frame.
         # We attach the object pose by right-multiplying the per-tag offset:
-        #   T_ref_obj = T_ref_tag @ offset
-        # so the offset must remain in the same convention used when it was
-        # authored in Detecting.py and related scripts.
+        #   T_frame_obj = T_frame_tag @ offset
 
         positions = []
         first_rot = None
@@ -81,4 +81,3 @@ class Tracker:
             "rot": first_rot,
         }
         return self.pose
-

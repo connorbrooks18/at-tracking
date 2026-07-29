@@ -11,6 +11,7 @@ COLOR_AXIS_Z = (255, 0, 0)
 COLOR_TRACKER_ORIGIN = (255, 255, 255)
 COLOR_TEXT = (255, 255, 255)
 COLOR_WAITING = (0, 0, 255)
+COLOR_MODE = (0, 255, 255)
 
 
 def reference_extrinsics(reference_pose):
@@ -107,7 +108,7 @@ def draw_tracker_overlay(
         cv2.putText(frame, "Z", (zx + 4, zy - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.5, COLOR_AXIS_Z, 1)
 
         x, y, z = position[0]
-        label = f"{tracker.name} (X:{x:+.2f}, Y:{y:+.2f}, Z:{z:+.2f})"
+        label = f"{tracker.name} (X:{x:+.3f}, Y:{y:+.3f}, Z:{z:+.3f})"
         cv2.putText(
             frame,
             label,
@@ -146,13 +147,47 @@ def annotate_frame(
     trackers,
     camera_matrix,
     dist_coeffs,
+    use_reference_frame: bool = False,
 ):
-    """Draw tag outlines, reference axes, and tracker overlays on a BGR frame."""
+    """Draw tag outlines and tracker overlays on a BGR frame."""
     draw_tag_outlines(frame, tag_dict)
 
-    if last_reference_pose is None:
+    if use_reference_frame:
+        if last_reference_pose is None:
+            cv2.putText(
+                frame,
+                "Waiting for Reference Tag (ID 1)...",
+                (20, 40),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                COLOR_WAITING,
+                2,
+            )
+            return
+
+        rvec, tvec = reference_extrinsics(last_reference_pose)
+        draw_reference_axes(frame, camera_matrix, dist_coeffs, rvec, tvec)
+        draw_tracker_axes(frame, trackers, camera_matrix, dist_coeffs, rvec, tvec)
+        cv2.putText(
+            frame,
+            "Mode: reference frame",
+            (20, 70),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            COLOR_MODE,
+            2,
+        )
         return
 
-    rvec, tvec = reference_extrinsics(last_reference_pose)
-    draw_reference_axes(frame, camera_matrix, dist_coeffs, rvec, tvec)
+    rvec = np.zeros((3, 1), dtype=np.float64)
+    tvec = np.zeros((3, 1), dtype=np.float64)
     draw_tracker_axes(frame, trackers, camera_matrix, dist_coeffs, rvec, tvec)
+    cv2.putText(
+        frame,
+        "Mode: camera frame",
+        (20, 40),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.6,
+        COLOR_MODE,
+        2,
+    )

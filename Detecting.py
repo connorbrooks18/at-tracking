@@ -17,7 +17,14 @@ TAG_SIZE_M = 0.0170
 class Detecting:
     """RealSense capture, AprilTag detection, and reference-frame tracking pipeline."""
 
-    def __init__(self, allowed_ids, reference_id, trackers, decision_margin=5):
+    def __init__(
+        self,
+        allowed_ids,
+        reference_id,
+        trackers,
+        decision_margin=5,
+        use_reference_frame: bool = False,
+    ):
         """
         Args:
             allowed_ids:     Tag IDs to accept from the detector.
@@ -25,11 +32,15 @@ class Detecting:
                              Should be fixed and reliably visible at all times.
             trackers:        Tracker instances to update each frame.
             decision_margin: Minimum detector confidence (higher = stricter).
+            use_reference_frame: When True, express tracked poses in the
+                reference-tag frame. When False, keep everything in the camera
+                frame and treat the reference tag as optional/disabled.
         """
         self.allowed_ids         = allowed_ids
         self.reference_id        = reference_id
         self.trackers            = trackers
         self.decision_margin     = decision_margin
+        self.use_reference_frame = bool(use_reference_frame)
         self.last_reference_pose = None  # persists across brief occlusions
 
         self._init_camera()
@@ -85,22 +96,19 @@ class Detecting:
         """Detect tags, update reference frame, refresh tracker poses.
 
         Returns:
-            tags_in_ref : dict  tag_id -> {'pos': (3,), 'rot': (3,3)}
+            tags_out : dict  tag_id -> {'pos': (3,), 'rot': (3,3)}
             tag_dict    : dict  tag_id -> raw Detection (camera frame)
         """
         tag_dict = self._detect_valid_tags(frame)
 
-        if self.reference_id in tag_dict:
+        if self.use_reference_frame and self.reference_id in tag_dict:
             self.last_reference_pose = tag_dict[self.reference_id]
 
-        if self.last_reference_pose is None:
-            return {}, tag_dict
-
-        tags_in_ref = self._transform_to_reference(tag_dict)
+        tags_out = self._transform_to_output_frame(tag_dict)
         for tracker in self.trackers:
-            tracker.updatePose(tags_in_ref)
+            tracker.updatePose(tags_out)
 
-        return tags_in_ref, tag_dict
+        return tags_out, tag_dict
 
     def annotate_frame(self, frame, tag_dict):
         """Draw debug overlays — implementation lives in annotate.py."""
@@ -111,6 +119,7 @@ class Detecting:
             trackers=self.trackers,
             camera_matrix=self.K,
             dist_coeffs=self.dist_coeffs,
+            use_reference_frame=self.use_reference_frame,
         )
 
     def _detect_valid_tags(self, frame):
@@ -129,15 +138,22 @@ class Detecting:
             and tag.tag_id in self.allowed_ids
         }
 
-    def _transform_to_reference(self, tag_dict):
-        """Express every detected tag pose in the reference tag's frame.
+    def _transform_to_output_frame(self, tag_dict):
+        """Return tag poses in either camera frame or reference-tag frame."""
+        if not self.use_reference_frame:
+            tags_in_camera = {}
+            for tag_id, tag in tag_dict.items():
+                tags_in_camera[tag_id] = {
+                    "pos": np.asarray(tag.pose_t, dtype=np.float32).reshape(3),
+                    "rot": np.asarray(tag.pose_R, dtype=np.float32),
+                }
+            return tags_in_camera
 
-        For each tag:
-            pos_in_ref = R_ref^T @ (pos_in_cam - pos_ref_in_cam)
-            rot_in_ref = R_ref^T @ R_tag
-        """
-        R_ref_inv     = self.last_reference_pose.pose_R.T  # R^T = R^-1 for rotation matrices
-        t_ref         = self.last_reference_pose.pose_t
+        if self.last_reference_pose is None:
+            return {}
+
+        R_ref_inv = self.last_reference_pose.pose_R.T
+        t_ref = self.last_reference_pose.pose_t
 
         tags_in_ref = {}
         for tag_id, tag in tag_dict.items():
@@ -156,6 +172,12 @@ def main():
     parser.add_argument("--output", default="output.parquet", help="Raw tracking Parquet path")
     parser.add_argument("--headless", action=argparse.BooleanOptionalAction, default=True,
                         help="Disable OpenCV GUI windows and run headless (default: true)")
+    parser.add_argument(
+        "--use-reference-frame",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Express tracker output in the reference-tag frame instead of the camera frame",
+    )
     args = parser.parse_args()
 
     stop_requested = Event()
@@ -198,18 +220,18 @@ def main():
         allowed_ids=(0, 1, 2, 3, 4, 5, 6, 7, 8),
         reference_id=1,
         trackers=trackers,
-        decision_margin=3
+        decision_margin=3,
+        use_reference_frame=bool(args.use_reference_frame),
     )
 
-    # For now, the reference-tag origin is also the fruiting-system base.
-    # TODO: replace [0, 0, 0] with a calibrated reference-tag-to-base offset
-    # when that calibration becomes available.
+    output_frame = "reference_apriltag" if args.use_reference_frame else "camera_color_optical_frame"
     tracking_metadata = {
         "capture_start_timestamp": capture_start,
         "reference_tag_id": pipeline.reference_id,
-        "reference_tag_is_fruiting_base": True,
-        "fruiting_base_pos": [0.0, 0.0, 0.0],
-        "coordinate_frame": "reference_apriltag",
+        "reference_tag_enabled": bool(args.use_reference_frame),
+        "reference_tag_is_fruiting_base": bool(args.use_reference_frame),
+        "fruiting_base_pos": [0.0, 0.0, 0.0] if args.use_reference_frame else None,
+        "coordinate_frame": output_frame,
         "position_unit": "m",
         "quaternion_order": "xyzw",
         "tag_family": "tag36h11",
@@ -238,9 +260,9 @@ def main():
             for tracker in trackers
         },
         "topology": {
-            "node_order": ["fruiting_base", "Branch", "Spur", "Apple"],
+            "node_order": (["fruiting_base"] if args.use_reference_frame else []) + ["Branch", "Spur", "Apple"],
             "woody_part_names": ["Branch", "Spur", "Apple"],
-            "start_nodes": ["fruiting_base", "Branch", "Spur"],
+            "start_nodes": (["fruiting_base"] if args.use_reference_frame else []) + ["Branch", "Spur"],
             "end_nodes": ["Branch", "Spur", "Apple"],
         },
     }
