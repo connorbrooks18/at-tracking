@@ -58,6 +58,9 @@ class Detecting:
         self.decision_margin     = decision_margin
         self.use_reference_frame = bool(use_reference_frame)
         self.last_reference_pose = None  # persists across brief occlusions
+        self.record_video = False
+        self.record_video_path = None
+        self.video_writer = None
 
         self._init_camera()
         self.detector = Detector(families="tag36h11",
@@ -107,6 +110,37 @@ class Detecting:
         )
         # D435 distortion is negligible at typical working distances.
         self.dist_coeffs = np.zeros(5, dtype=np.float32)
+
+    def _open_video_writer(self, output_path: Path, frame_shape) -> None:
+        if self.video_writer is not None:
+            return
+        height, width = frame_shape[:2]
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        self.video_writer = cv2.VideoWriter(
+            str(output_path),
+            fourcc,
+            float(self.camera_fps),
+            (int(width), int(height)),
+        )
+        if not self.video_writer.isOpened():
+            self.video_writer = None
+            raise RuntimeError(f"Could not open video writer for {output_path}")
+        self.record_video_path = output_path
+
+    def write_recorded_frame(self, frame):
+        if not self.record_video:
+            return
+        if self.record_video_path is None:
+            raise RuntimeError("record_video_path must be set before recording frames")
+        if self.video_writer is None:
+            self._open_video_writer(self.record_video_path, frame.shape)
+        self.video_writer.write(frame)
+
+    def close(self):
+        if self.video_writer is not None:
+            self.video_writer.release()
+            self.video_writer = None
 
     def process_frame(self, frame):
         """Detect tags, update reference frame, refresh tracker poses.
@@ -203,6 +237,17 @@ class Detecting:
 def main():
     parser = argparse.ArgumentParser(description="Record AprilTag poses with Unix timestamps.")
     parser.add_argument("--output", default="output.parquet", help="Raw tracking Parquet path")
+    parser.add_argument(
+        "--record",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Record the full camera feed to an .mp4 alongside the tracking output",
+    )
+    parser.add_argument(
+        "--record-output",
+        default=None,
+        help="Optional MP4 path for --record; defaults to the tracking output stem with .mp4",
+    )
     parser.add_argument("--snapshot-request", default=None, help="File to poll for one-shot snapshot requests")
     parser.add_argument("--snapshot-output", default=None, help="JSON path for the requested one-shot snapshot")
     parser.add_argument("--headless", action=argparse.BooleanOptionalAction, default=True,
@@ -258,6 +303,11 @@ def main():
         decision_margin=3,
         use_reference_frame=bool(args.use_reference_frame),
     )
+    pipeline.record_video = bool(args.record)
+    if pipeline.record_video:
+        record_output = Path(args.record_output) if args.record_output else Path(args.output).with_suffix(".mp4")
+        pipeline.record_video_path = record_output
+        print(f"Recording camera feed to {record_output}")
     tracking_metadata = {
         "capture_start_timestamp": capture_start,
         "coordinate_frame": "franka_base_o",
@@ -277,6 +327,8 @@ def main():
             "intrinsics_matrix": pipeline.K.tolist(),
             "distortion_coefficients": pipeline.dist_coeffs.tolist(),
         },
+        "video_recording_enabled": bool(args.record),
+        "video_recording_path": str(pipeline.record_video_path) if pipeline.record_video_path else None,
         "tracker_names": [tracker.name for tracker in trackers],
         "tracker_tag_ids": {
             tracker.name: [int(tag_id) for tag_id in tracker.ids]
@@ -338,7 +390,10 @@ def main():
 
             frame = np.asanyarray(color_frame.get_data())
             _, tag_dict = pipeline.process_frame(frame)
+            recorded_frame = frame.copy() if pipeline.record_video else None
             pipeline.annotate_frame(frame, tag_dict)
+            if recorded_frame is not None:
+                pipeline.write_recorded_frame(recorded_frame)
             frame_timestamp = time.time()
 
             current_poses = {}
@@ -369,6 +424,7 @@ def main():
             },
         )
         print(f"Wrote tracking data to {args.output}")
+        pipeline.close()
         pipeline.pipeline.stop()
         cv2.destroyAllWindows()
 
