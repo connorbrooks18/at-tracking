@@ -274,7 +274,7 @@ def main():
 
     # second apple offset is for tag only 45 degrees from it
     apple_offsets = [
-        {"pos": [0, 0.0, .11], "rot": [[-0.7071, 0, -0.7071], [0, 1, 0], [0.7071, 0, -0.7071]]},
+        {"pos": [.02, 0.0, .11], "rot": [[-0.7071, 0, -0.7071], [0, 1, 0], [0.7071, 0, -0.7071]]},
         # Tag 6 uses the same apple convention as read_apple_pose.py: rotate
         # -45 degrees about the tag's y axis so x/y stay consistent and z points
         # the correct way in the right-handed frame.
