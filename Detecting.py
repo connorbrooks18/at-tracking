@@ -282,7 +282,8 @@ def main():
     ]
     apple = Tracker.Tracker("Apple", ids=(7,0), id_offsets=apple_offsets)
 
-    spur_offsets = [{"pos": [0.0, 0.035, 0.03], "rot": np.eye(3)},{"pos": [0.0, 0.035, 0.03], "rot": [[0, 0, -1], [0, 1,  0], [1, 0,  0]]},{"pos": [0.0, 0.035, 0.03], "rot": [[0, 0, 1], [0, 1,  0], [-1, 0,  0]]}]
+    spur_down_offset = 0.035 # 0.035 is 'normal' for non-small spurs. 0.025 if going on apple directly (not on spur)
+    spur_offsets = [{"pos": [0.0, spur_down_offset, 0.03], "rot": np.eye(3)},{"pos": [0.0, spur_down_offset, 0.03], "rot": [[0, 0, -1], [0, 1,  0], [1, 0,  0]]},{"pos": [0.0, spur_down_offset, 0.03], "rot": [[0, 0, 1], [0, 1,  0], [-1, 0,  0]]}]
     spur = Tracker.Tracker("Spur", ids=(3,4,5,), id_offsets=spur_offsets)
 
     branch_offsets = [
