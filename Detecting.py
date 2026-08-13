@@ -75,7 +75,7 @@ class Detecting:
         """Start the RealSense color stream and cache intrinsics."""
         self.pipeline = rs.pipeline()
         config        = rs.config()
-        self.camera_fps = 15 # 6, 15, 30
+        self.camera_fps = 30 # 6, 15, 30
         self.camera_width = 1280
         self.camera_height = 720
         self.camera_exposure = 100
@@ -86,6 +86,7 @@ class Detecting:
             rs.format.bgr8,
             self.camera_fps,
         )
+        
         profile = self.pipeline.start(config)
         color_sensor = profile.get_device().query_sensors()[1]
         color_sensor.set_option(rs.option.enable_auto_exposure, 0)
