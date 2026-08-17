@@ -5,10 +5,7 @@ For replay, this script reads the saved camera-to-base calibration from the
 Parquet metadata, inverts it, and projects the base-frame geometry onto the
 current camera image.
 
-The replay overlay follows the compiler topology directly:
-three woody chords are stored in `woody_part_start_pos` / `woody_part_end_pos`
-in `junction_names` order, and there is no synthetic `fruiting_base` point
-used for display here.
+The replay overlay uses the canonical Branch, Spur, and Apple pose columns.
 
 Usage:
     python Replay.py ../pull_unified.parquet
@@ -94,7 +91,7 @@ def load_unified_episode(filename: str) -> UnifiedEpisode:
     """Load a unified episode and invert its saved camera-to-base calibration."""
     path = Path(filename)
     table = pq.read_table(path)
-    required = {"timestamp", "tcp_pos", "apple_pos", "woody_part_start_pos", "woody_part_end_pos"}
+    required = {"timestamp", "tcp_pos", "apple_pos", "branch_pose_4x4", "spur_pose_4x4"}
     missing = required - set(table.column_names)
     if missing:
         raise ValueError(
@@ -252,14 +249,11 @@ def draw_unified_row(frame, row, base_to_camera_4x4, camera_matrix, dist_coeffs)
     tcp_pose_cam = pose_base_to_camera(row.get("tcp_pose_4x4"), base_to_camera_4x4)
     draw_pose_axes(frame, tcp_pose_cam, "TCP pose", COLOR_TCP, camera_matrix, dist_coeffs)
 
-    # The row stores the woody chord endpoints in `junction_names` order.
-    # For replay we only render the two physical segments you care about:
-    # Spur, then the Spur-to-Apple connection.
-    starts = np.asarray(row.get("woody_part_start_pos", []), dtype=np.float64).reshape(-1)
-    ends = np.asarray(row.get("woody_part_end_pos", []), dtype=np.float64).reshape(-1)
-    if starts.size == 9 and ends.size == 9:
-        spur_start = point_base_to_camera(starts[0:3], base_to_camera_4x4)
-        spur_end = point_base_to_camera(ends[0:3], base_to_camera_4x4)
+    branch_pose = np.asarray(row.get("branch_pose_4x4", []), dtype=np.float64).reshape(-1)
+    spur_pose = np.asarray(row.get("spur_pose_4x4", []), dtype=np.float64).reshape(-1)
+    if branch_pose.size == 16 and spur_pose.size == 16:
+        spur_start = point_base_to_camera(branch_pose.reshape(4, 4)[:3, 3], base_to_camera_4x4)
+        spur_end = point_base_to_camera(spur_pose.reshape(4, 4)[:3, 3], base_to_camera_4x4)
         draw_line(frame, spur_start, spur_end, "Spur", COLOR_SPUR, camera_matrix, dist_coeffs)
         draw_point(frame, spur_start, "Spur start", COLOR_SPUR, camera_matrix, dist_coeffs)
         draw_point(frame, spur_end, "Spur end", COLOR_SPUR, camera_matrix, dist_coeffs)
